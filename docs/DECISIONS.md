@@ -154,3 +154,54 @@ Rules:
   cache per message if profiling ever demands it. Content beyond
   `MAX_SCROLL` rows (60k) is out of reach, an accepted edge. TestBackend
   rendering tests lock the follow/scroll behavior in.
+
+## D012 — Sessions: JSON files, std-only time, auto-save on stream end
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** Phase 2 requires durable transcripts. Time formatting is the
+  only reason a session store would want a date crate, and the picker only
+  needs coarse relative ages.
+- **Decision:** One JSON file per conversation under
+  `$XDG_DATA_HOME/veritas/sessions` (else `~/.local/share/...`), named
+  `sess-<unixsecs>.json` with a `version` field for future migrations.
+  Writes are atomic (tmp + rename). Timestamps are std unix seconds — no
+  chrono; the UI renders `Xm/h/d ago`. Auto-title = first user message,
+  whitespace-collapsed, ≤40 chars. Saves fire after each finished or
+  cancelled stream and before the picker opens; a message-count dirty
+  check skips no-op writes. `/clear` drops the session identity so the
+  next save starts a new file instead of overwriting the cleared one.
+  Corrupt files are skipped by the lister, never repaired.
+- **Consequences:** No new dependencies (serde/serde_json already in the
+  tree). `list` reads every file fully — fine at human session counts.
+  Timestamp collision in ids is theoretically possible across hosts;
+  irrelevant for a single-machine TUI.
+
+## D013 — Session picker: centered Clear+List modal, Ctrl-S or /sessions
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** Phase 2 requires a keyboard session chooser. The ROADMAP
+  widget inventory pre-approved `Clear` for overlay backgrounds.
+- **Decision:** Ctrl-S (and `/sessions`) opens a centered 60%×60% modal:
+  `Clear` punches out the buffer, a ratatui `List` shows title · msgs ·
+  age, newest first. Modal routing: while open, every key goes to the
+  picker (↑/↓ ±1, PgUp/PgDn ±10, wrap-around; Enter loads; Esc cancels);
+  typing cannot fall through to the input. Opening while streaming is
+  refused with a status hint instead of saving a partial exchange. The
+  picker never touches disk itself — it renders `session::list` output
+  and `confirm_load` applies `session::load`.
+- **Consequences:** No new widget crate (rule 8). Overlay rendering is
+  untested-below-TestBackend like the rest of ui.rs — rendering tests
+  cover punch-through, empty state, and key routing. No delete/rename
+  action in the picker: add via a new decision if wanted.
+
+## D014 — `/export <file>` writes hand-rolled markdown
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** Phase 2 export. A markdown crate would import a parser to
+  do a serializer's job.
+- **Decision:** `session::export_markdown` emits `# <title>` then
+  `## You` / `## Agent` sections with message content verbatim. Failures
+  (unwritable path) surface in the status line, never panic.
+- **Consequences:** No dependency. Content is not escaped — a message
+  containing `##` renders as a heading in downstream viewers; accepted
+  because the export is a faithful transcript, not sanitized prose.

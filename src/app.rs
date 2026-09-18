@@ -9,6 +9,7 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::provider::{self, StreamEvent, WireMessage};
+use crate::session;
 use crate::sysmon::SysStats;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +51,13 @@ pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", 
 /// (D011).
 pub const MAX_SCROLL: u16 = 60_000;
 
+/// Session-picker overlay state (D013). Keyboard-only; owns no I/O —
+/// storage goes through `session`.
+pub struct Picker {
+    pub entries: Vec<session::SessionEntry>,
+    pub selected: usize,
+}
+
 pub struct App<'a> {
     pub messages: Vec<ChatMessage>,
     pub input: TextArea<'a>,
@@ -67,6 +75,16 @@ pub struct App<'a> {
     /// Context window probed from the engine; None = unknown → sidebar
     /// shows n/a (D009).
     pub ctx_window: Option<u64>,
+    /// Active session file stem; None until the first message is saved (D012).
+    pub session_id: Option<String>,
+    /// Auto-title from the first user message (D012).
+    pub session_title: Option<String>,
+    /// created_at stamp for the active session; 0 = no session yet.
+    pub session_created: u64,
+    /// Message count at the last successful save — auto-save dirty check.
+    last_saved_len: usize,
+    /// Open picker overlay; while `Some`, every key routes to it (D013).
+    pub picker: Option<Picker>,
     meta_tx: UnboundedSender<(String, Option<u64>)>,
     meta_rx: Option<UnboundedReceiver<(String, Option<u64>)>>,
 }
@@ -85,13 +103,19 @@ impl<'a> App<'a> {
             follow: true,
             streaming: false,
             spinner_idx: 0,
-            status: "Ready — Enter send · PgUp/PgDn scroll · Ctrl-C quit".to_string(),
+            status: "Ready — Enter send · PgUp/PgDn scroll · Ctrl-S sessions · Ctrl-C quit"
+                .to_string(),
             config,
             stats: SysStats::new(),
             rx: None,
             pending: String::new(),
             temperature_override: None,
             ctx_window: None,
+            session_id: None,
+            session_title: None,
+            session_created: 0,
+            last_saved_len: 0,
+            picker: None,
             meta_tx,
             meta_rx: Some(meta_rx),
         };
@@ -122,6 +146,146 @@ impl<'a> App<'a> {
         }
     }
 
+    /// First user message content, or "" — auto-title source (D012).
+    fn first_user_text(&self) -> String {
+        self.messages
+            .iter()
+            .find(|m| m.role == Role::User)
+            .map(|m| m.content.clone())
+            .unwrap_or_default()
+    }
+
+    /// Persist the transcript (D012): after each finished/cancelled stream
+    /// and before opening the picker. Cheap atomic writes; the empty
+    /// transcript resets session identity so /clear starts fresh.
+    fn auto_save(&mut self) {
+        if self.messages.is_empty() {
+            self.session_id = None;
+            self.session_title = None;
+            self.session_created = 0;
+            self.last_saved_len = 0;
+            return;
+        }
+        if self.last_saved_len == self.messages.len() {
+            return; // nothing appended since the last write
+        }
+        if self.session_created == 0 {
+            self.session_created = session::now_unix();
+        }
+        if self.session_id.is_none() {
+            self.session_id = Some(session::new_id());
+        }
+        let title = match self.session_title.clone() {
+            Some(t) => t,
+            None => {
+                let t = session::auto_title(&self.first_user_text());
+                self.session_title = Some(t.clone());
+                t
+            }
+        };
+        let dir = session::sessions_dir();
+        let id = self.session_id.as_deref().expect("just set").to_string();
+        let created = self.session_created;
+        match session::save(&dir, &id, Some(&title), created, &self.messages) {
+            Ok(()) => {
+                self.last_saved_len = self.messages.len();
+                self.status =
+                    format!("Saved {id} · {} msgs — Ctrl-S sessions", self.messages.len());
+            }
+            Err(e) => self.status = format!("Session save failed: {e}"),
+        }
+    }
+
+    /// Open the session picker, saving any unsaved transcript first (D013).
+    pub fn open_picker(&mut self) {
+        if self.streaming {
+            self.status = "Stop the stream first (Esc), then Ctrl-S.".to_string();
+            return;
+        }
+        self.auto_save();
+        let entries = session::list(&session::sessions_dir());
+        self.picker = Some(Picker {
+            entries,
+            selected: 0,
+        });
+    }
+
+    pub fn close_picker(&mut self) {
+        self.picker = None;
+    }
+
+    /// Modal key routing while the picker is open (D013).
+    pub fn handle_picker_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Esc => self.close_picker(),
+            KeyCode::Up => self.picker_move(-1),
+            KeyCode::Down => self.picker_move(1),
+            KeyCode::PageUp => self.picker_move(-10),
+            KeyCode::PageDown => self.picker_move(10),
+            KeyCode::Enter => self.confirm_load(),
+            _ => {}
+        }
+    }
+
+    /// Wrap-around selection move; delta may be negative.
+    pub fn picker_move(&mut self, delta: i32) {
+        if let Some(p) = &mut self.picker {
+            let n = p.entries.len();
+            if n == 0 {
+                return;
+            }
+            p.selected = (p.selected as i32 + delta).rem_euclid(n as i32) as usize;
+        }
+    }
+
+    /// Enter in the picker: load the highlighted session (D013).
+    pub fn confirm_load(&mut self) {
+        let id = match self
+            .picker
+            .as_ref()
+            .and_then(|p| p.entries.get(p.selected))
+        {
+            Some(e) => e.id.clone(),
+            None => return,
+        };
+        self.picker = None;
+        match session::load(&session::sessions_dir(), &id) {
+            Ok((title, created, messages)) => {
+                // Rough ctx estimate until the next stream sends usage (D009).
+                let chars: usize = messages.iter().map(|m| m.content.len()).sum();
+                self.messages = messages;
+                self.session_id = Some(id);
+                self.session_title = title;
+                self.session_created = created;
+                self.last_saved_len = self.messages.len();
+                self.stats.ctx_used = (chars / 4) as u64;
+                self.follow = true;
+                self.scroll = 0;
+                self.status = format!(
+                    "Loaded “{}” · {} msgs",
+                    self.session_title.as_deref().unwrap_or("session"),
+                    self.messages.len()
+                );
+            }
+            Err(e) => self.status = format!("Load failed: {e}"),
+        }
+    }
+
+    /// `/export <file>` — transcript as markdown (D014).
+    fn export_session(&mut self, path: &str) {
+        if self.messages.is_empty() {
+            self.status = "Nothing to export.".to_string();
+            return;
+        }
+        let md = session::export_markdown(self.session_title.as_deref(), &self.messages);
+        match std::fs::write(path, md) {
+            Ok(()) => {
+                self.status = format!("Exported {} msgs to {path}", self.messages.len());
+            }
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
     fn history_for_api(&self) -> Vec<WireMessage> {
         self.messages
             .iter()
@@ -142,12 +306,23 @@ impl<'a> App<'a> {
             Some("clear") => {
                 self.messages.clear();
                 self.stats.ctx_used = 0;
+                // Fresh identity: the next save must not overwrite the file
+                // that held the cleared conversation (D012).
+                self.session_id = None;
+                self.session_title = None;
+                self.session_created = 0;
+                self.last_saved_len = 0;
                 self.status = "Cleared.".to_string();
             }
             Some("help") => {
-                self.status =
-                    "Commands: /clear · /model <id> · /temp <0.0-2.0> · /help".to_string();
+                self.status = "Commands: /clear · /sessions · /export <file> · /model <id> · /temp <0.0-2.0> · /help"
+                    .to_string();
             }
+            Some("sessions") => self.open_picker(),
+            Some("export") => match parts.next() {
+                Some(path) => self.export_session(path),
+                None => self.status = "Usage: /export <file>".to_string(),
+            },
             Some("model") => match parts.next() {
                 Some(id) => {
                     self.config.model = id.to_string();
@@ -241,6 +416,7 @@ impl<'a> App<'a> {
                 content: std::mem::take(&mut self.pending),
             });
         }
+        self.auto_save();
         self.status = "Stopped.".to_string();
     }
 
@@ -283,6 +459,7 @@ impl<'a> App<'a> {
                     content: std::mem::take(&mut self.pending),
                 });
             }
+            self.auto_save();
             self.status = format!("Error: {e}");
         } else if done {
             self.streaming = false;
@@ -298,7 +475,8 @@ impl<'a> App<'a> {
                     content: "(empty response)".to_string(),
                 });
             }
-            self.status = "Ready — Enter send · PgUp/PgDn scroll · Ctrl-C quit".to_string();
+            self.auto_save();
+            self.status = "Ready — Enter send · PgUp/PgDn scroll · Ctrl-S sessions".to_string();
         }
     }
 }
@@ -345,6 +523,18 @@ where
                     && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
                 {
                     return Ok(());
+                }
+                // Picker is modal: it swallows every key while open (D013).
+                if app.picker.is_some() {
+                    app.handle_picker_key(key.code);
+                    continue;
+                }
+                // Ctrl-S: save-then-list the sessions (D012/D013).
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char('s')
+                {
+                    app.open_picker();
+                    continue;
                 }
                 match key.code {
                     KeyCode::Esc if app.streaming => {

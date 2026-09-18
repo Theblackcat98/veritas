@@ -51,6 +51,17 @@ impl Theme {
     pub fn gauge_ram() -> Color {
         Color::Blue
     }
+    /// Picker selection highlight (session list rows).
+    pub fn picker_selected() -> Style {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    }
+    /// Dimmed metadata text in the picker (ages, counts, hints).
+    pub fn picker_dim() -> Style {
+        Style::default().fg(Color::DarkGray)
+    }
     /// CTX gauge shifts green → yellow → red as the window fills.
     pub fn gauge_ctx(ratio: f64) -> Color {
         if ratio >= 0.9 {

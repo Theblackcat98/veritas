@@ -2,12 +2,13 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Gauge, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
-    Sparkline, Table,
+    Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Scrollbar,
+    ScrollbarOrientation, ScrollbarState, Sparkline, Table,
 };
 use ratatui::Frame;
 
 use crate::app::{App, Role, MAX_SCROLL, SPINNER_FRAMES};
+use crate::session;
 use crate::theme::Theme;
 
 /// Outer: horizontal [main | sidebar(30)].
@@ -32,6 +33,89 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_spinner(f, app, main[1]);
     draw_input(f, app, main[2]);
     draw_sidebar(f, app, outer[1]);
+
+    // Modal overlays render last, on top of everything (D013).
+    if app.picker.is_some() {
+        draw_picker(f, app, f.area());
+    }
+}
+
+/// Centered modal session picker: `Clear` punches a hole in the buffer
+/// (ROADMAP widget inventory, Phase 2), ratatui `List` for rows (no new
+/// widget crate, rule 8). Keyboard-only by charter.
+fn draw_picker(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    // 60% width, 60% height, centered.
+    let vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+            Constraint::Percentage(20),
+        ])
+        .split(area);
+    let horiz = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+            Constraint::Percentage(20),
+        ])
+        .split(vert[1]);
+
+    let popup = horiz[1];
+    let picker = app.picker.as_mut().expect("checked by caller");
+    let now = session::now_unix();
+
+    let items: Vec<ListItem> = if picker.entries.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "  No saved sessions yet — chat, then press Ctrl-S.",
+            Theme::picker_dim(),
+        )))]
+    } else {
+        picker
+            .entries
+            .iter()
+            .map(|e| {
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!(" {} ", truncate_chars(&e.title, 32)),
+                        Theme::agent_text(),
+                    ),
+                    Span::styled(
+                        format!("· {} msgs · {}", e.msg_count, session::rel_time(e.updated_at, now)),
+                        Theme::picker_dim(),
+                    ),
+                ]))
+            })
+            .collect()
+    };
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Theme::border())
+                .title(Span::styled(
+                    " Sessions — ↑/↓ select · Enter load · Esc cancel ",
+                    Theme::title(),
+                )),
+        )
+        .highlight_style(Theme::picker_selected());
+    let mut state = ListState::default();
+    state.select(Some(picker.selected));
+    f.render_widget(Clear, popup);
+    f.render_stateful_widget(list, popup, &mut state);
+}
+
+/// Char-boundary-safe truncation for picker rows.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
 }
 
 /// Wrap one logical line to the transcript's inner width and push every
@@ -293,6 +377,7 @@ fn short_base(base: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyCode;
     use crate::app::{ChatMessage, Config};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -377,5 +462,78 @@ mod tests {
     async fn no_seeded_greeting_in_history() {
         let app = test_app();
         assert!(app.messages.is_empty(), "history must start empty");
+    }
+
+    fn entry(id: &str, title: &str, msgs: usize) -> crate::session::SessionEntry {
+        crate::session::SessionEntry {
+            id: id.to_string(),
+            title: title.to_string(),
+            updated_at: 100,
+            msg_count: msgs,
+        }
+    }
+
+    #[tokio::test]
+    async fn picker_renders_entries_and_hides_background() {
+        let mut app = test_app();
+        long_transcript(&mut app);
+        app.picker = Some(crate::app::Picker {
+            entries: vec![
+                entry("sess-1", "First chat", 4),
+                entry("sess-2", "Second chat", 9),
+            ],
+            selected: 1,
+        });
+        // 60x30: popup covers rows 6..24, cols 12..48 — the sidebar gauges
+        // (VRAM/RAM/CTX titles at x≈29) must be punched out by Clear.
+        let text = render(&mut app, 60, 30);
+        assert!(text.contains("Sessions —"), "picker title visible:\n{text}");
+        assert!(text.contains("First chat"), "entries listed:\n{text}");
+        assert!(text.contains("Second chat"), "entries listed:\n{text}");
+        assert!(text.contains("9 msgs"), "metadata shown:\n{text}");
+        assert!(
+            !text.contains("VRAM"),
+            "overlay must hide widgets behind it:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn picker_empty_state_hint() {
+        let mut app = test_app();
+        app.picker = Some(crate::app::Picker {
+            entries: Vec::new(),
+            selected: 0,
+        });
+        let text = render(&mut app, 60, 30);
+        assert!(
+            text.contains("No saved sessions"),
+            "empty state must explain itself:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn picker_keys_move_with_wrap_and_esc_closes() {
+        let mut app = test_app();
+        app.picker = Some(crate::app::Picker {
+            entries: vec![entry("a", "A", 1), entry("b", "B", 2), entry("c", "C", 3)],
+            selected: 0,
+        });
+        app.handle_picker_key(KeyCode::Down);
+        assert_eq!(app.picker.as_ref().expect("open").selected, 1);
+        app.handle_picker_key(KeyCode::Up);
+        app.handle_picker_key(KeyCode::Up);
+        assert_eq!(
+            app.picker.as_ref().expect("open").selected,
+            2,
+            "wrap past top lands on last entry"
+        );
+        app.handle_picker_key(KeyCode::PageDown);
+        assert_eq!(
+            app.picker.as_ref().expect("open").selected,
+            0,
+            "PageDown wraps: (2+10) mod 3 = 0"
+        );
+        app.handle_picker_key(KeyCode::Esc);
+        assert!(app.picker.is_none(), "Esc closes the picker");
     }
 }

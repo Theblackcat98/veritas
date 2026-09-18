@@ -32,13 +32,13 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
   feedback ✅
 - CTX gauge color shift (green → yellow → red) as the window fills ✅
 
-## Phase 2 — Sessions 🔜
+## Phase 2 — Sessions ✅
 
 - Save/load transcripts as JSON under XDG data dir
-  (`~/.local/share/veritas/sessions`)
-- Auto-title a session from the first user message
-- Keyboard session-picker overlay
-- `/export <file>` writes the transcript as markdown
+  (`~/.local/share/veritas/sessions`) ✅
+- Auto-title a session from the first user message ✅
+- Keyboard session-picker overlay (Ctrl-S or `/sessions`) ✅
+- `/export <file>` writes the transcript as markdown ✅
 
 ## Phase 3 — Reading experience 🧭
 
@@ -74,7 +74,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 | Sparkline (ratatui)          | GPU % history               | ✅ real (P1)                  |
 | Table (ratatui)              | Model params                | ✅ real params (P1)           |
 | Scrollbar (ratatui)          | Transcript position         | ✅                            |
-| Clear widget (ratatui)       | Overlay backgrounds         | 🔜 Phase 2/4                  |
+| Clear widget (ratatui)       | Overlay backgrounds         | ✅ real (P2 picker)           |
 
 New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 
@@ -89,4 +89,4 @@ New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 | `/help`                      | Command list in status bar | ✅     |
 | `?`                          | Help overlay               | 🔜     |
 | `/model`, `/temp`            | Set params                 | ✅     |
-| Ctrl-S                       | Save session               | 🔜 P2  |
+| Ctrl-S                       | Sessions picker (save+list)| ✅ P2  |
