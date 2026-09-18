@@ -85,6 +85,8 @@ pub struct App<'a> {
     last_saved_len: usize,
     /// Open picker overlay; while `Some`, every key routes to it (D013).
     pub picker: Option<Picker>,
+    /// Phase (0.0..1.0) of the streaming shimmer sweep (D017).
+    pub shimmer_phase: f32,
     meta_tx: UnboundedSender<(String, Option<u64>)>,
     meta_rx: Option<UnboundedReceiver<(String, Option<u64>)>>,
 }
@@ -116,6 +118,7 @@ impl<'a> App<'a> {
             session_created: 0,
             last_saved_len: 0,
             picker: None,
+            shimmer_phase: 0.0,
             meta_tx,
             meta_rx: Some(meta_rx),
         };
@@ -507,6 +510,9 @@ where
         }
         if app.streaming && last_spinner.elapsed() >= Duration::from_millis(80) {
             app.spinner_idx = (app.spinner_idx + 1) % SPINNER_FRAMES.len();
+            // Shimmer sweep shares the spinner tick (D014): 80 ms × ~25
+            // steps ≈ a 2 s sweep, matching tui-shimmer's default cadence.
+            app.shimmer_phase = (app.shimmer_phase + 0.04) % 1.0;
             last_spinner = Instant::now();
         }
 

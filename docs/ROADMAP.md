@@ -42,10 +42,12 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 
 ## Phase 3 — Reading experience 🧭
 
-- Lightweight markdown for agent messages: fenced code blocks, inline code,
-  bold/italic — explicitly **not** full CommonMark
-- Keyboard copy of code-block contents
-- Readability pass on the theme (spacing, label styling)
+- ~~Lightweight markdown for agent messages~~ → ✅ full markdown via
+  `tui-markdown` (D012 supersedes the lightweight scope; code blocks get
+  syntax highlighting)
+- Keyboard copy of code-block contents 🔜
+- Readability pass on the theme (spacing, label styling) 🔜
+- Streaming shimmer on the status line ✅ (D014)
 
 ## Phase 4 — Polish & release 🧭
 
@@ -69,7 +71,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 | Widget (source)              | Used for                    | Status                        |
 |------------------------------|-----------------------------|-------------------------------|
 | Paragraph (ratatui)          | Transcript, status/spinner  | ✅                            |
-| TextArea (tui-textarea)      | Input                       | ✅                            |
+| TextArea (ratatui-textarea)  | Input                       | ✅                            |
 | Gauge (ratatui)              | VRAM, RAM, CTX              | ✅ real (P1)                  |
 | Sparkline (ratatui)          | GPU % history               | ✅ real (P1)                  |
 | Table (ratatui)              | Model params                | ✅ real params (P1)           |

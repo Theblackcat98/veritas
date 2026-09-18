@@ -72,4 +72,20 @@ impl Theme {
             Color::Green
         }
     }
+    /// Inline `code` spans and fenced blocks in agent messages (D013).
+    pub fn md_code() -> Style {
+        Style::default().fg(Color::LightCyan)
+    }
+    /// Link labels in agent messages (D013).
+    pub fn md_link() -> Style {
+        Style::default()
+            .fg(Color::LightBlue)
+            .add_modifier(Modifier::UNDERLINED)
+    }
+    /// Blockquoted lines in agent messages (D013).
+    pub fn md_blockquote() -> Style {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::ITALIC)
+    }
 }

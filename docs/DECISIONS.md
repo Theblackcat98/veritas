@@ -205,3 +205,45 @@ Rules:
 - **Consequences:** No dependency. Content is not escaped — a message
   containing `##` renders as a heading in downstream viewers; accepted
   because the export is a faithful transcript, not sanitized prose.
+## D015 — Markdown rendering via `tui-markdown` (supersedes D006's "library TBD")
+- **Date:** 2026-09-17
+- **Status:** accepted
+- **Context:** D006 accepted lightweight markdown for agent messages but deferred the
+  library choice. Owner instruction (2026-09-17) selected full markdown via a crate.
+  Alternatives: `ratatui-markdown` (rejected: SySL-1.0 license imposes AI-disclosure
+  obligations on anyone distributing binaries; ~10× feature surface we don't need) and
+  hand-rolling (rejected: reimplementing CommonMark poorly, D004-style, for no gain).
+- **Decision:** `tui-markdown` 0.3 (MIT OR Apache-2.0, by a ratatui maintainer, 478k
+  downloads). Agent messages render through `md_style::render_wrapped`, which wraps the
+  rendered styled lines to the transcript width so D011's exact row-count follow-tail
+  math is preserved. Veritas colors flow through `Theme` via a small StyleSheet impl
+  (`md_code`, `md_link`, `md_blockquote` tokens). This intentionally exceeds D006's
+  "lightweight" scope and the ROADMAP rejection of "full markdown"; owner approved
+  2026-09-17. User messages stay plain text.
+- **Consequences:** `syntect` + `pulldown-cmark` enter the dep tree via the default
+  `highlight-code` feature (code blocks get syntax highlighting). Markdown parse cost
+  per frame at chat sizes is acceptable; revisit with a cache if profiling demands.
+
+## D016 — ratatui 0.30 upgrade and `ratatui-textarea` swap
+- **Date:** 2026-09-17
+- **Status:** accepted
+- **Context:** `tui-textarea` is unmaintained (last release 2024-10, targets ratatui
+  0.29) and blocks the 0.30 ecosystem. Most current widget crates (probed 2026-09-17)
+  target ratatui 0.30 / ratatui-core 0.1; staying on 0.29 forecloses them.
+- **Decision:** ratatui 0.29 → 0.30, crossterm 0.28 → 0.29, `tui-textarea` →
+  `ratatui-textarea` 0.9 (same TextArea/Input API, maintained under the ratatui org).
+  `App::run` gains `io::Error: From<B::Error>` for the 0.30 backend-error change.
+- **Consequences:** Unlocks current-ecosystem widget crates for future decisions.
+  D007's u16 overflow guard retained — harmless and still bounds follow-tail range.
+
+## D017 — Streaming shimmer via `tui-shimmer`
+- **Date:** 2026-09-17
+- **Status:** accepted
+- **Context:** Owner requested a text shimmer for the streaming state. The status line
+  is one row of styled spans; a per-character highlight sweep is exactly that shape.
+- **Decision:** `tui-shimmer` 0.1.3 (MIT). `shimmer_spans_with_style_at_phase` is
+  driven from the existing 80 ms spinner tick (`App::shimmer_phase` +0.04/tick ≈ 2 s
+  sweep) — external-phase API matches D002's sync-loop, no-extra-timer architecture.
+  Base style comes from `Theme::spinner()`.
+- **Consequences:** One more dependency for a cosmetic effect, accepted by owner.
+  Shimmer renders only while streaming; idle status line stays static.

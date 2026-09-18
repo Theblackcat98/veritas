@@ -1,4 +1,5 @@
 mod app;
+mod md_style;
 mod provider;
 mod session;
 mod sysmon;

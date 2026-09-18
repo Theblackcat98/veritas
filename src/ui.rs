@@ -8,6 +8,7 @@ use ratatui::widgets::{
 use ratatui::Frame;
 
 use crate::app::{App, Role, MAX_SCROLL, SPINNER_FRAMES};
+use crate::md_style;
 use crate::session;
 use crate::theme::Theme;
 
@@ -147,12 +148,18 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             Span::styled(format!("◆ {label} "), style),
             Span::styled("─".repeat(8), Theme::separator()),
         ]));
-        let body_style = match msg.role {
-            Role::User => Theme::user_text(),
-            Role::Agent => Theme::agent_text(),
-        };
-        for chunk in msg.content.split('\n') {
-            push_wrapped(&mut rows, text_width, chunk, body_style);
+        match msg.role {
+            Role::User => {
+                for chunk in msg.content.split('\n') {
+                    push_wrapped(&mut rows, text_width, chunk, Theme::user_text());
+                }
+            }
+            // Agent messages are markdown (D012): styled structure beats a
+            // flat block. md_style pre-wraps to text_width, so follow-tail
+            // row math is untouched (D011).
+            Role::Agent => {
+                rows.extend(md_style::render_wrapped(&msg.content, text_width));
+            }
         }
         rows.push(Line::from(""));
     }
@@ -213,20 +220,28 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 fn draw_spinner(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let text = if app.streaming {
-        format!(
+    if app.streaming {
+        // Shimmer sweep driven from the spinner tick (D014): phase advances
+        // in app::run so the animation cadence matches the rest of the UI.
+        let label = format!(
             " {} Thinking… streaming (Esc to stop)",
             SPINNER_FRAMES[app.spinner_idx]
-        )
-    } else {
-        app.status.clone()
-    };
-    let style = if app.streaming {
-        Theme::spinner()
-    } else {
-        Theme::status()
-    };
-    f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+        );
+        let spans = tui_shimmer::shimmer_spans_with_style_at_phase(
+            &label,
+            Theme::spinner(),
+            app.shimmer_phase,
+        );
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        return;
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            app.status.clone(),
+            Theme::status(),
+        ))),
+        area,
+    );
 }
 
 fn draw_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
