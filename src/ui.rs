@@ -43,10 +43,7 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         };
         lines.push(Line::from(vec![
             Span::styled(format!("◆ {label} ",), style),
-            Span::styled(
-                "─".repeat(8),
-                Style::default().fg(ratatui::style::Color::DarkGray),
-            ),
+            Span::styled("─".repeat(8), Theme::separator()),
         ]));
         let body_style = match msg.role {
             Role::User => Theme::user_text(),
@@ -65,7 +62,7 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     if app.streaming {
         lines.push(Line::from(vec![
             Span::styled("◆ Agent ", Theme::agent_label()),
-            Span::styled("─".repeat(8), Theme::status()),
+            Span::styled("─".repeat(8), Theme::separator()),
         ]));
         if app.pending.is_empty() {
             lines.push(Line::from(Span::styled("…", Theme::status())));

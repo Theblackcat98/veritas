@@ -5,9 +5,6 @@ use ratatui::style::{Color, Modifier, Style};
 pub struct Theme;
 
 impl Theme {
-    pub fn bg() -> Color {
-        Color::Reset
-    }
     pub fn border() -> Style {
         Style::default().fg(Color::DarkGray)
     }
@@ -33,6 +30,9 @@ impl Theme {
         Style::default().fg(Color::Gray)
     }
     pub fn status() -> Style {
+        Style::default().fg(Color::DarkGray)
+    }
+    pub fn separator() -> Style {
         Style::default().fg(Color::DarkGray)
     }
     pub fn spinner() -> Style {
