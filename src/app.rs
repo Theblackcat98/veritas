@@ -510,7 +510,7 @@ where
         }
         if app.streaming && last_spinner.elapsed() >= Duration::from_millis(80) {
             app.spinner_idx = (app.spinner_idx + 1) % SPINNER_FRAMES.len();
-            // Shimmer sweep shares the spinner tick (D014): 80 ms × ~25
+            // Shimmer sweep shares the spinner tick (D017): 80 ms × ~25
             // steps ≈ a 2 s sweep, matching tui-shimmer's default cadence.
             app.shimmer_phase = (app.shimmer_phase + 0.04) % 1.0;
             last_spinner = Instant::now();

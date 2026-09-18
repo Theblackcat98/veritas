@@ -43,11 +43,11 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 ## Phase 3 — Reading experience 🧭
 
 - ~~Lightweight markdown for agent messages~~ → ✅ full markdown via
-  `tui-markdown` (D012 supersedes the lightweight scope; code blocks get
+  `tui-markdown` (D015 supersedes the lightweight scope; code blocks get
   syntax highlighting)
 - Keyboard copy of code-block contents 🔜
 - Readability pass on the theme (spacing, label styling) 🔜
-- Streaming shimmer on the status line ✅ (D014)
+- Streaming shimmer on the status line ✅ (D017)
 
 ## Phase 4 — Polish & release 🧭
 

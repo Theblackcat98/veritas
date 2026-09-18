@@ -221,7 +221,7 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 
 fn draw_spinner(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     if app.streaming {
-        // Shimmer sweep driven from the spinner tick (D014): phase advances
+        // Shimmer sweep driven from the spinner tick (D017): phase advances
         // in app::run so the animation cadence matches the rest of the UI.
         let label = format!(
             " {} Thinking… streaming (Esc to stop)",

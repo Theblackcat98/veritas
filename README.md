@@ -9,7 +9,10 @@ endpoint — Ollama, llama.cpp server, OpenAI, OpenRouter, vLLM, etc.
 
 ## Features
 
-- Token-by-token SSE streaming with Esc-to-cancel
+- Token-by-token SSE streaming with Esc-to-cancel, shimmer status line while
+  streaming
+- Full markdown rendering for agent replies — headings, lists, tables,
+  links, blockquotes, and syntax-highlighted code blocks
 - PgUp/PgDn, Ctrl-U/Ctrl-D, and mouse-wheel scrolling with follow-tail
 - Shift+Enter for newlines, `/clear` to reset the conversation
 - Sessions: auto-saved JSON transcripts, Ctrl-S picker overlay, markdown
