@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use sysinfo::System;
 
 /// Real telemetry for the sidebar. Raw counters, not ratios, so titles can
-/// show true numbers (see D010). `vram = None` means "no usable GPU" and the
-/// VRAM/GPU widgets are hidden (D014).
+/// show true numbers (see D010). `vram = None` means "no usable GPU" and
+/// the VRAM/GPU widgets show n/a in place (rule 9).
 #[derive(Debug, Clone)]
 pub struct SysStats {
     pub ram_used: u64,            // bytes
@@ -74,7 +74,7 @@ impl Sampler {
 
 /// Locate an AMD GPU through DRM sysfs. AMD vendor id is `0x1002`. Among
 /// multiple AMD cards the one with the largest reported VRAM wins, so a
-/// discrete GPU beats an iGPU carve-out (D014). None on other setups.
+/// discrete GPU beats an iGPU carve-out. None on other setups.
 fn find_amdgpu() -> Option<PathBuf> {
     let mut best: Option<(u64, PathBuf)> = None;
     let entries = fs::read_dir("/sys/class/drm").ok()?;

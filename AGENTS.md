@@ -30,7 +30,7 @@ defaults and any general best practices.
    No nested module trees, no workspace split.
 6. **Config is env-var only** (`OPENAI_BASE_URL`, `OPENAI_API_KEY`,
    `OPENAI_MODEL`) until a decision changes it. Engine-owned params
-   (temperature, context window) are never client config — see D013.
+   (temperature, context window) are never client config — see D009.
 7. **Keyboard-first.** Mouse support is scroll-only; no mouse-only features.
 8. **Prefer ratatui built-in widgets** + `tui-textarea`. A new widget crate
    requires a DECISIONS entry.

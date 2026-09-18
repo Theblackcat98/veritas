@@ -26,7 +26,7 @@ struct ChatRequest {
     messages: Vec<WireMessage>,
     stream: bool,
     /// Omitted entirely unless the user overrides via /temp — the engine's
-    /// own temperature then applies (D013).
+    /// own temperature then applies (D009).
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
 }
@@ -48,7 +48,7 @@ struct ChunkDelta {
     content: Option<String>,
 }
 
-/// Token usage as reported by the server in a stream chunk, when present (D011).
+/// Token usage as reported by the server in a stream chunk, when present (D009).
 #[derive(Debug, Deserialize)]
 struct Usage {
     #[serde(default)]
@@ -152,7 +152,7 @@ pub async fn stream_chat(
 }
 
 /// Best-effort probe of the model's context window from the inference
-/// engine (D013). Ollama-only today — the charter's default local target:
+/// engine (D009). Ollama-only today — the charter's default local target:
 /// `POST {root}/api/show` on the base URL with `/v1` stripped. Returns None
 /// on any other engine or any error; the sidebar then shows `n/a`.
 pub async fn fetch_context_length(base: String, model: String) -> Option<u64> {

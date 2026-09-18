@@ -29,7 +29,7 @@ Everything comes from environment variables:
 
 Engine-owned parameters are not client config: requests omit `temperature`
 unless you override it at runtime with `/temp`, and the context window is
-probed from the engine (D013).
+probed from the engine (D009).
 
 ## Sidebar telemetry
 

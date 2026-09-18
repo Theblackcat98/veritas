@@ -50,7 +50,7 @@ impl Config {
 pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 /// Transcript scroll ceiling. Doubles as the u16 overflow guard for
 /// ratatui 0.29's `area.height + scroll` and bounds the follow-tail range
-/// (D015).
+/// (D011).
 pub const MAX_SCROLL: u16 = 60_000;
 
 pub struct App<'a> {
@@ -65,10 +65,10 @@ pub struct App<'a> {
     pub stats: SysStats,
     rx: Option<UnboundedReceiver<StreamEvent>>,
     pub pending: String,
-    /// Runtime `/temp` override; None = engine's own temperature (D013).
+    /// Runtime `/temp` override; None = engine's own temperature (D009).
     pub temperature_override: Option<f32>,
     /// Context window probed from the engine; None = unknown → sidebar
-    /// shows n/a (D013).
+    /// shows n/a (D009).
     pub ctx_window: Option<u64>,
     meta_tx: UnboundedSender<(String, Option<u64>)>,
     meta_rx: Option<UnboundedReceiver<(String, Option<u64>)>>,
@@ -103,7 +103,7 @@ impl<'a> App<'a> {
     }
 
     /// Ask the inference engine for the model's context window; the answer
-    /// arrives on `meta_rx` and is applied in `drain_meta` (D013).
+    /// arrives on `meta_rx` and is applied in `drain_meta` (D009).
     fn spawn_ctx_probe(&self) {
         let base = self.config.base_url.clone();
         let model = self.config.model.clone();
@@ -138,7 +138,7 @@ impl<'a> App<'a> {
             .collect()
     }
 
-    /// Slash commands. Never enter the chat history (D012).
+    /// Slash commands. Never enter the chat history (D009).
     fn handle_command(&mut self, cmd: &str) {
         let mut parts = cmd.split_whitespace();
         match parts.next() {
@@ -212,7 +212,7 @@ impl<'a> App<'a> {
         self.status = "Streaming… (Esc to stop)".to_string();
 
         let mut history = self.history_for_api();
-        // Rough ctx estimate until/unless the server sends real usage (D011).
+        // Rough ctx estimate until/unless the server sends real usage (D009).
         let chars: usize = history.iter().map(|m| m.content.len()).sum();
         self.stats.ctx_used = (chars / 4) as u64;
 
@@ -260,7 +260,7 @@ impl<'a> App<'a> {
                         self.stats.ctx_used += (t.len() / 4) as u64;
                     }
                     StreamEvent::Usage { prompt_tokens, completion_tokens } => {
-                        // Server-reported truth beats the chars/4 estimate (D011).
+                        // Server-reported truth beats the chars/4 estimate (D009).
                         self.stats.ctx_used = prompt_tokens + completion_tokens;
                     }
                     StreamEvent::Done => {

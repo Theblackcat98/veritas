@@ -36,7 +36,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 /// Wrap one logical line to the transcript's inner width and push every
 /// rendered row. Pre-wrapping is what makes follow-tail exact: rows.len()
-/// is the true height ratatui will paint (D015).
+/// is the true height ratatui will paint (D011).
 fn push_wrapped(rows: &mut Vec<Line>, width: usize, s: &str, style: Style) {
     if s.is_empty() {
         rows.push(Line::from(""));
@@ -100,7 +100,7 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 
     // Follow-tail with exact row math. ratatui's Paragraph does NOT saturate
     // scroll.y — an offset past the content paints blank — so pinning to the
-    // bottom must use the real row count, not a sentinel like u16::MAX (D015).
+    // bottom must use the real row count, not a sentinel like u16::MAX (D011).
     let total = rows.len();
     let view = view_h.max(1) as usize;
     // MAX_SCROLL also keeps `area.height + scroll.y` inside u16 (D007).
@@ -175,7 +175,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     );
 
     // Model params table — live values: engine-probed ctx, /temp override or
-    // engine default (D013).
+    // engine default (D009).
     let base_short = short_base(&app.config.base_url);
     let temp_str = match app.temperature_override {
         Some(t) => t.to_string(),
@@ -248,7 +248,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(spark, rows[5]);
 
     // CTX usage — ratio gauge when the window is probed; otherwise an
-    // empty gauge with an n/a label, never a fake ratio (D013 / rule 9).
+    // empty gauge with an n/a label, never a fake ratio (D009 / rule 9).
     let ctx_ratio = match app.ctx_window {
         Some(max) if max > 0 => {
             (app.stats.ctx_used as f64 / max as f64).clamp(0.0, 1.0)
