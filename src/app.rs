@@ -48,7 +48,9 @@ impl Config {
 }
 
 pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-/// Keep well below u16::MAX so `area.height + scroll` in ratatui 0.29 never overflows.
+/// Transcript scroll ceiling. Doubles as the u16 overflow guard for
+/// ratatui 0.29's `area.height + scroll` and bounds the follow-tail range
+/// (D015).
 pub const MAX_SCROLL: u16 = 60_000;
 
 pub struct App<'a> {
@@ -78,11 +80,9 @@ impl<'a> App<'a> {
         input.set_placeholder_text("Type a message — Enter to send, Shift+Enter newline…");
         let (meta_tx, meta_rx) = unbounded_channel::<(String, Option<u64>)>();
         let app = Self {
-            messages: vec![ChatMessage {
-                role: Role::Agent,
-                content: "Veritas ready. Set OPENAI_BASE_URL / OPENAI_MODEL and hit Enter."
-                    .to_string(),
-            }],
+            // Start empty — a seeded greeting would be sent to the model as
+            // if it had said it.
+            messages: Vec::new(),
             input,
             scroll: 0,
             follow: true,

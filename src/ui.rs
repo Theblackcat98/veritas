@@ -4,10 +4,10 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Gauge, Paragraph, Row, Scrollbar, ScrollbarOrientation,
-    ScrollbarState, Sparkline, Table, Wrap,
+    ScrollbarState, Sparkline, Table,
 };
 
-use crate::app::{Role, SPINNER_FRAMES, App};
+use crate::app::{Role, SPINNER_FRAMES, App, MAX_SCROLL};
 use crate::theme::Theme;
 
 /// Outer: horizontal [main | sidebar(30)].
@@ -34,15 +34,33 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_sidebar(f, app, outer[1]);
 }
 
+/// Wrap one logical line to the transcript's inner width and push every
+/// rendered row. Pre-wrapping is what makes follow-tail exact: rows.len()
+/// is the true height ratatui will paint (D015).
+fn push_wrapped(rows: &mut Vec<Line>, width: usize, s: &str, style: Style) {
+    if s.is_empty() {
+        rows.push(Line::from(""));
+        return;
+    }
+    for frag in textwrap::fill(s, width).split('\n') {
+        rows.push(Line::from(Span::styled(frag.to_string(), style)));
+    }
+}
+
 fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let mut lines: Vec<Line> = Vec::new();
+    // Inner text area: the block border takes one column/row on each side.
+    let text_width = (area.width as usize).saturating_sub(2).max(1);
+    let view_h = area.height.saturating_sub(2);
+
+    let mut rows: Vec<Line> = Vec::new();
     for msg in &app.messages {
         let (label, style) = match msg.role {
             Role::User => ("You", Theme::user_label()),
             Role::Agent => ("Agent", Theme::agent_label()),
         };
-        lines.push(Line::from(vec![
-            Span::styled(format!("◆ {label} ",), style),
+        // Short header line — never wraps, so it stays exactly one row.
+        rows.push(Line::from(vec![
+            Span::styled(format!("◆ {label} "), style),
             Span::styled("─".repeat(8), Theme::separator()),
         ]));
         let body_style = match msg.role {
@@ -50,22 +68,17 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             Role::Agent => Theme::agent_text(),
         };
         for chunk in msg.content.split('\n') {
-            // Wrap is handled by Paragraph, but keep explicit lines for blank lines.
-            if chunk.is_empty() {
-                lines.push(Line::from(""));
-            } else {
-                lines.push(Line::from(Span::styled(chunk.to_string(), body_style)));
-            }
+            push_wrapped(&mut rows, text_width, chunk, body_style);
         }
-        lines.push(Line::from(""));
+        rows.push(Line::from(""));
     }
     if app.streaming {
-        lines.push(Line::from(vec![
+        rows.push(Line::from(vec![
             Span::styled("◆ Agent ", Theme::agent_label()),
             Span::styled("─".repeat(8), Theme::separator()),
         ]));
         if app.pending.is_empty() {
-            lines.push(Line::from(Span::styled("…", Theme::status())));
+            rows.push(Line::from(Span::styled("…", Theme::status())));
         } else {
             // Show last ~2000 chars of the in-flight response to keep render cheap.
             let tail: String = app
@@ -78,33 +91,37 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 .rev()
                 .collect();
             for chunk in tail.split('\n') {
-                lines.push(Line::from(Span::styled(
-                    chunk.to_string(),
-                    Theme::agent_text(),
-                )));
+                push_wrapped(&mut rows, text_width, chunk, Theme::agent_text());
             }
-            lines.push(Line::from(Span::styled("▊", Theme::spinner())));
+            rows.push(Line::from(Span::styled("▊", Theme::spinner())));
         }
-        lines.push(Line::from(""));
+        rows.push(Line::from(""));
     }
 
-    // NB: ratatui 0.29 Paragraph does `area.height + scroll.y` in u16,
-    // so u16::MAX overflows. Clamp to a safe max that still follows to bottom.
-    let max_safe = u16::MAX.saturating_sub(area.height).saturating_sub(1);
-    let raw = if app.follow { u16::MAX } else { app.scroll };
-    let scroll = raw.min(max_safe);
-    let para = Paragraph::new(lines)
+    // Follow-tail with exact row math. ratatui's Paragraph does NOT saturate
+    // scroll.y — an offset past the content paints blank — so pinning to the
+    // bottom must use the real row count, not a sentinel like u16::MAX (D015).
+    let total = rows.len();
+    let view = view_h.max(1) as usize;
+    // MAX_SCROLL also keeps `area.height + scroll.y` inside u16 (D007).
+    let max_scroll = total.saturating_sub(view).min(MAX_SCROLL as usize);
+    let scroll = if app.follow {
+        max_scroll
+    } else {
+        (app.scroll as usize).min(max_scroll)
+    } as u16;
+
+    let para = Paragraph::new(rows)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Theme::border())
                 .title(Span::styled(" Chat ", Theme::title())),
         )
-        .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
     f.render_widget(para, area);
 
-    let mut state = ScrollbarState::new(app.messages.len()).position(scroll as usize);
+    let mut state = ScrollbarState::new(max_scroll).position(scroll as usize);
     let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None);
@@ -257,5 +274,95 @@ fn short_base(base: &str) -> String {
         format!("…{}", &s[s.len() - 17..])
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{ChatMessage, Config};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn test_app() -> App<'static> {
+        // Port 9 refuses instantly; the spawned ctx probe never matters here.
+        App::new(Config {
+            base_url: "http://127.0.0.1:9/v1".to_string(),
+            api_key: String::new(),
+            model: "test".to_string(),
+        })
+    }
+
+    fn render(app: &mut App<'_>, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|f| draw(f, app)).expect("draw");
+        let buf = terminal.backend().buffer();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn long_transcript(app: &mut App<'_>) {
+        for i in 1..=40 {
+            app.messages.push(ChatMessage {
+                role: if i % 2 == 0 { Role::User } else { Role::Agent },
+                content: format!("message {i:02} with some padding so lines exist"),
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn follow_pins_tail_to_bottom() {
+        let mut app = test_app();
+        long_transcript(&mut app);
+        app.follow = true;
+        let text = render(&mut app, 60, 20);
+        assert!(
+            text.contains("message 40"),
+            "last message must be visible in follow mode:\n{text}"
+        );
+        assert!(
+            !text.contains("message 01 "),
+            "top must be scrolled away in follow mode:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn streaming_keeps_tail_visible() {
+        let mut app = test_app();
+        long_transcript(&mut app);
+        app.streaming = true;
+        app.pending = "partial answer ".repeat(40);
+        app.follow = true;
+        let text = render(&mut app, 60, 20);
+        assert!(
+            text.contains("partial answer"),
+            "streaming tail must stay visible:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn scroll_top_shows_first_message() {
+        let mut app = test_app();
+        long_transcript(&mut app);
+        app.follow = false;
+        app.scroll = 0;
+        let text = render(&mut app, 60, 20);
+        assert!(
+            text.contains("message 01"),
+            "scroll 0 must show the first message:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_seeded_greeting_in_history() {
+        let app = test_app();
+        assert!(app.messages.is_empty(), "history must start empty");
     }
 }

@@ -186,3 +186,21 @@ Rules:
 - **Consequences:** Linux + amdgpu only; on anything else the VRAM/GPU
   widgets stay hidden (rule 9). NVIDIA support can return via a future
   decision.
+
+## D015 — Follow-tail via pre-wrapped row counts; `textwrap` for wrapping
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** ratatui 0.29's Paragraph does not saturate `scroll.y` — an
+  offset past the content paints blank. Follow mode used a `u16::MAX`
+  sentinel (kept in bounds by D007's clamp), so the transcript went blank
+  whenever follow was active; streaming made it look like chat disappeared.
+- **Decision:** The transcript pre-wraps every logical line with
+  `textwrap` (already a dependency since the initial commit, previously
+  unused), so the exact rendered row count is known. Follow pins scroll to
+  `total_rows - view_height`; manual scroll clamps to the same bound;
+  `MAX_SCROLL` doubles as the u16 overflow guard (D007). Paragraph wrap
+  mode removed.
+- **Consequences:** Re-wrapping happens per frame — fine at chat sizes;
+  cache per message if profiling ever demands it. Content beyond
+  `MAX_SCROLL` rows (60k) is out of reach, an accepted edge. TestBackend
+  rendering tests lock the follow/scroll behavior in.
