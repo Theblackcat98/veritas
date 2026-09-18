@@ -26,6 +26,17 @@ impl StyleSheet for VeritasMd {
     fn blockquote(&self) -> Style {
         Theme::md_blockquote()
     }
+
+    // Chat reader, not a markdown source view: heading level is conveyed by
+    // the heading style, not literal `###` markers; fenced blocks by their
+    // highlighted content, not ``` delimiters. The hooks exist for this.
+    fn heading_marker(&self, _level: u8) -> &str {
+        ""
+    }
+
+    fn code_block_fence(&self) -> &str {
+        ""
+    }
 }
 
 /// Wrap one styled ratatui line to `width` display columns, preserving the
