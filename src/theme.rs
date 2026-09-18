@@ -51,7 +51,14 @@ impl Theme {
     pub fn gauge_ram() -> Color {
         Color::Blue
     }
-    pub fn gauge_ctx() -> Color {
-        Color::Green
+    /// CTX gauge shifts green → yellow → red as the window fills.
+    pub fn gauge_ctx(ratio: f64) -> Color {
+        if ratio >= 0.9 {
+            Color::Red
+        } else if ratio >= 0.7 {
+            Color::Yellow
+        } else {
+            Color::Green
+        }
     }
 }

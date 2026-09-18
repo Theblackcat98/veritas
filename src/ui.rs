@@ -135,33 +135,45 @@ fn draw_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    // VRAM + GPU widgets exist only when a usable NVIDIA GPU is present (D009).
+    let has_gpu = app.stats.vram.is_some();
+    let mut constraints = vec![
+        Constraint::Length(3), // header
+        Constraint::Length(9), // model table
+        Constraint::Min(1),    // filler
+    ];
+    if has_gpu {
+        constraints.push(Constraint::Length(3)); // VRAM
+    }
+    constraints.push(Constraint::Length(3)); // RAM
+    if has_gpu {
+        constraints.push(Constraint::Length(6)); // GPU sparkline
+    }
+    constraints.push(Constraint::Length(3)); // CTX
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(9),
-            Constraint::Min(1),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(6),
-            Constraint::Length(3),
-        ])
+        .constraints(constraints)
         .split(area);
+
+    let mut i = 0;
 
     // Header
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(" Veritas Agent ", Theme::sidebar_title())))
             .block(Block::default().borders(Borders::ALL).border_style(Theme::border())),
-        rows[0],
+        rows[i],
     );
+    i += 1;
 
-    // Model params table
+    // Model params table — live config values, not hardcoded (D012).
     let base_short = short_base(&app.config.base_url);
+    let temp_str = format!("{}", app.config.temperature);
+    let ctx_str = format!("{} tok", app.config.ctx_size);
     let table = Table::new(
         vec![
             Row::new(vec!["model", app.config.model.as_str()]),
-            Row::new(vec!["ctx", "128k"]),
-            Row::new(vec!["temp", "0.7"]),
+            Row::new(vec!["ctx", ctx_str.as_str()]),
+            Row::new(vec!["temp", temp_str.as_str()]),
             Row::new(vec!["base", base_short.as_str()]),
         ],
         [Constraint::Length(6), Constraint::Min(8)],
@@ -172,48 +184,84 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .border_style(Theme::border())
             .title(Span::styled(" Model ", Theme::title())),
     );
-    f.render_widget(table, rows[1]);
+    f.render_widget(table, rows[i]);
+    i += 1;
 
-    // VRAM / RAM gauges
-    f.render_widget(
-        Gauge::default()
-            .block(Block::default().title(" VRAM ").borders(Borders::ALL))
+    // VRAM gauge (NVIDIA only)
+    if let Some((used, total)) = app.stats.vram {
+        let ratio = if total == 0 {
+            0.0
+        } else {
+            used as f64 / total as f64
+        };
+        let gauge = Gauge::default()
+            .block(
+                Block::default()
+                    .title(format!(" VRAM {} ", gib_pair(used, total)))
+                    .borders(Borders::ALL),
+            )
             .gauge_style(Style::default().fg(Theme::gauge_vram()))
-            .ratio(app.stats.vram_ratio.clamp(0.0, 1.0)),
-        rows[3],
-    );
-    f.render_widget(
-        Gauge::default()
-            .block(Block::default().title(" RAM ").borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Theme::gauge_ram()))
-            .ratio(app.stats.ram_ratio.clamp(0.0, 1.0)),
-        rows[4],
-    );
+            .ratio(ratio.clamp(0.0, 1.0));
+        f.render_widget(gauge, rows[i]);
+        i += 1;
+    }
 
-    // GPU sparkline
-    let spark = Sparkline::default()
-        .block(Block::default().title(" GPU % ").borders(Borders::ALL))
-        .data(&app.stats.gpu_history)
-        .max(100);
-    f.render_widget(spark, rows[5]);
-
-    // CTX usage
-    let ctx_ratio = if app.stats.ctx_max == 0 {
+    // RAM gauge — always available via sysinfo (D008)
+    let ram_ratio = if app.stats.ram_total == 0 {
         0.0
     } else {
-        (app.stats.ctx_used as f64 / app.stats.ctx_max as f64).clamp(0.0, 1.0)
+        app.stats.ram_used as f64 / app.stats.ram_total as f64
+    };
+    let ram_title = if app.stats.ram_total == 0 {
+        " RAM n/a ".to_string()
+    } else {
+        format!(
+            " RAM {} ",
+            gib_pair(app.stats.ram_used, app.stats.ram_total)
+        )
+    };
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default().title(ram_title).borders(Borders::ALL))
+            .gauge_style(Style::default().fg(Theme::gauge_ram()))
+            .ratio(ram_ratio.clamp(0.0, 1.0)),
+        rows[i],
+    );
+    i += 1;
+
+    // GPU sparkline (NVIDIA only)
+    if has_gpu {
+        let spark = Sparkline::default()
+            .block(Block::default().title(" GPU % ").borders(Borders::ALL))
+            .data(&app.stats.gpu_history)
+            .max(100);
+        f.render_widget(spark, rows[i]);
+        i += 1;
+    }
+
+    // CTX usage — real window from config (D011), color shifts with fill (D003).
+    let ctx_max = app.config.ctx_size;
+    let ctx_ratio = if ctx_max == 0 {
+        0.0
+    } else {
+        (app.stats.ctx_used as f64 / ctx_max as f64).clamp(0.0, 1.0)
     };
     f.render_widget(
         Gauge::default()
             .block(
                 Block::default()
-                    .title(format!(" CTX {}/{} ", app.stats.ctx_used, app.stats.ctx_max))
+                    .title(format!(" CTX {}/{} ", app.stats.ctx_used, ctx_max))
                     .borders(Borders::ALL),
             )
-            .gauge_style(Style::default().fg(Theme::gauge_ctx()))
+            .gauge_style(Style::default().fg(Theme::gauge_ctx(ctx_ratio)))
             .ratio(ctx_ratio),
-        rows[6],
+        rows[i],
     );
+}
+
+fn gib_pair(used: u64, total: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    format!("{:.1}/{:.1}G", used as f64 / GIB, total as f64 / GIB)
 }
 
 fn short_base(base: &str) -> String {

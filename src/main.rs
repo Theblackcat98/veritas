@@ -1,5 +1,6 @@
 mod app;
 mod provider;
+mod sysmon;
 mod theme;
 mod ui;
 

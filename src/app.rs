@@ -9,6 +9,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tui_textarea::{Input, TextArea};
 
 use crate::provider::{self, StreamEvent, WireMessage};
+use crate::sysmon::SysStats;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Role {
@@ -27,6 +28,8 @@ pub struct Config {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub temperature: f32,
+    pub ctx_size: u64,
 }
 
 impl Config {
@@ -36,46 +39,22 @@ impl Config {
         let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
         let model =
             std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "llama3.1".to_string());
+        let temperature = std::env::var("OPENAI_TEMPERATURE")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .map(|t| t.clamp(0.0, 2.0))
+            .unwrap_or(0.7);
+        let ctx_size = std::env::var("OPENAI_CTX_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(8192);
         Self {
             base_url,
             api_key,
             model,
-        }
-    }
-}
-
-/// Mock system stats for the sidebar. Real NVML/sysinfo wiring comes later.
-#[derive(Debug, Clone)]
-pub struct SysStats {
-    pub vram_ratio: f64, // 0.0..1.0
-    pub ram_ratio: f64,
-    pub gpu_history: Vec<u64>, // 0..100
-    pub ctx_used: u64,
-    pub ctx_max: u64,
-    tick: u64,
-}
-
-impl SysStats {
-    pub fn new() -> Self {
-        Self {
-            vram_ratio: 0.42,
-            ram_ratio: 0.55,
-            gpu_history: vec![20, 25, 30, 28, 35],
-            ctx_used: 0,
-            ctx_max: 128_000,
-            tick: 0,
-        }
-    }
-    pub fn tick(&mut self) {
-        self.tick += 1;
-        let t = self.tick as f64;
-        // Gentle fake waveforms so gauges/sparkline visibly move.
-        self.vram_ratio = 0.45 + 0.08 * (t / 7.0).sin();
-        self.ram_ratio = 0.55 + 0.05 * (t / 11.0).cos();
-        let gpu = (45.0 + 30.0 * (t / 5.0).sin() + (t % 7.0)) as u64;
-        self.gpu_history.push(gpu.min(100));
-        if self.gpu_history.len() > 60 {
-            self.gpu_history.remove(0);
+            temperature,
+            ctx_size,
         }
     }
 }
@@ -134,6 +113,39 @@ impl<'a> App<'a> {
             .collect()
     }
 
+    /// Slash commands. Never enter the chat history (D012).
+    fn handle_command(&mut self, cmd: &str) {
+        let mut parts = cmd.split_whitespace();
+        match parts.next() {
+            Some("clear") => {
+                self.messages.clear();
+                self.stats.ctx_used = 0;
+                self.status = "Cleared.".to_string();
+            }
+            Some("help") => {
+                self.status =
+                    "Commands: /clear · /model <id> · /temp <0.0-2.0> · /help".to_string();
+            }
+            Some("model") => match parts.next() {
+                Some(id) => {
+                    self.config.model = id.to_string();
+                    self.status = format!("Model set to {id}.");
+                }
+                None => self.status = "Usage: /model <id>".to_string(),
+            },
+            Some("temp") => match parts.next().and_then(|v| v.parse::<f32>().ok()) {
+                Some(t) if (0.0..=2.0).contains(&t) => {
+                    self.config.temperature = t;
+                    self.status = format!("Temperature set to {t}.");
+                }
+                _ => self.status = "Usage: /temp <0.0-2.0>".to_string(),
+            },
+            _ => {
+                self.status = format!("Unknown command: /{cmd} — try /help");
+            }
+        }
+    }
+
     fn send_current(&mut self) {
         if self.streaming {
             return;
@@ -143,10 +155,9 @@ impl<'a> App<'a> {
             self.status = "Type something first.".to_string();
             return;
         }
-        if text == "/clear" {
-            self.messages.clear();
+        if let Some(cmd) = text.strip_prefix('/') {
+            self.handle_command(cmd);
             self.input = TextArea::default();
-            self.status = "Cleared.".to_string();
             return;
         }
         self.messages.push(ChatMessage {
@@ -164,17 +175,26 @@ impl<'a> App<'a> {
         self.status = "Streaming… (Esc to stop)".to_string();
 
         let mut history = self.history_for_api();
-        // Rough ctx estimate for the sidebar gauge.
+        // Rough ctx estimate until/unless the server sends real usage (D011).
         let chars: usize = history.iter().map(|m| m.content.len()).sum();
         self.stats.ctx_used = (chars / 4) as u64;
 
         let base = self.config.base_url.clone();
         let key = self.config.api_key.clone();
         let model = self.config.model.clone();
+        let temperature = self.config.temperature;
         // Fire-and-forget; results come back over `tx`. Dropping `rx` on
         // cancel/stop makes late sends no-ops.
         Handle::current().spawn(async move {
-            provider::stream_chat(base, key, model, std::mem::take(&mut history), tx).await;
+            provider::stream_chat(
+                base,
+                key,
+                model,
+                temperature,
+                std::mem::take(&mut history),
+                tx,
+            )
+            .await;
         });
     }
 
@@ -200,6 +220,10 @@ impl<'a> App<'a> {
                     StreamEvent::Token(t) => {
                         self.pending.push_str(&t);
                         self.stats.ctx_used += (t.len() / 4) as u64;
+                    }
+                    StreamEvent::Usage { prompt_tokens, completion_tokens } => {
+                        // Server-reported truth beats the chars/4 estimate (D011).
+                        self.stats.ctx_used = prompt_tokens + completion_tokens;
                     }
                     StreamEvent::Done => {
                         done = true;
@@ -244,6 +268,9 @@ impl<'a> App<'a> {
 
 pub fn run<B: Backend>(terminal: &mut Terminal<B>, config: Config) -> io::Result<()> {
     let mut app = App::new(config);
+    let mut sampler = crate::sysmon::Sampler::new();
+    // Sample once before the first draw so widgets never show placeholder zeros.
+    sampler.sample(&mut app.stats);
     let mut last_stats = Instant::now();
     let mut last_spinner = Instant::now();
 
@@ -257,7 +284,7 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>, config: Config) -> io::Result
         };
 
         if last_stats.elapsed() >= Duration::from_millis(500) {
-            app.stats.tick();
+            sampler.sample(&mut app.stats);
             last_stats = Instant::now();
         }
         if app.streaming && last_spinner.elapsed() >= Duration::from_millis(80) {

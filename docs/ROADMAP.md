@@ -15,21 +15,22 @@ Status: ✅ done · 🔜 next · 🧭 later · 🚫 rejected
   CTX gauge (mocked data)
 - Single-file theme, env-var config
 
-## Phase 1 — Make the mockup honest 🔜
+## Phase 1 — Make the mockup honest ✅
 
-The sidebar currently shows fake data. Replace mocks with real sources and
-graceful fallbacks (show `n/a`, never crash):
+The sidebar showed fake data. Now real sources with graceful fallbacks
+(show `n/a`, hide widgets, never crash):
 
-- RAM via `sysinfo` crate
-- VRAM + GPU% via `nvml-wrapper` (NVIDIA); hide widget when no NVIDIA GPU
+- RAM via `sysinfo` crate ✅
+- VRAM + GPU% via `nvml-wrapper` (NVIDIA); hide widget when no NVIDIA GPU ✅
 - Real context size: parse `usage` from stream chunks when the server sends
-  it; keep the chars/4 estimate as fallback
+  it; keep the chars/4 estimate as fallback ✅
 - Real model params in the sidebar table (temperature etc. from config,
-  not hardcoded)
-- `/help`, `/model <id>`, `/temp <f>` slash commands with status-line feedback
-- CTX gauge color shift (green → yellow → red) as the window fills
+  not hardcoded) ✅
+- `/help`, `/model <id>`, `/temp <f>` slash commands with status-line
+  feedback ✅
+- CTX gauge color shift (green → yellow → red) as the window fills ✅
 
-## Phase 2 — Sessions 🧭
+## Phase 2 — Sessions 🔜
 
 - Save/load transcripts as JSON under XDG data dir
   (`~/.local/share/veritas/sessions`)
@@ -67,9 +68,9 @@ graceful fallbacks (show `n/a`, never crash):
 |------------------------------|-----------------------------|-------------------------------|
 | Paragraph (ratatui)          | Transcript, status/spinner  | ✅                            |
 | TextArea (tui-textarea)      | Input                       | ✅                            |
-| Gauge (ratatui)              | VRAM, RAM, CTX              | ✅ mocked → real in Phase 1   |
-| Sparkline (ratatui)          | GPU % history               | ✅ mocked → real in Phase 1   |
-| Table (ratatui)              | Model params                | ✅ ctx/temp hardcoded → P1    |
+| Gauge (ratatui)              | VRAM, RAM, CTX              | ✅ real (P1)                  |
+| Sparkline (ratatui)          | GPU % history               | ✅ real (P1)                  |
+| Table (ratatui)              | Model params                | ✅ real params (P1)           |
 | Scrollbar (ratatui)          | Transcript position         | ✅                            |
 | Clear widget (ratatui)       | Overlay backgrounds         | 🔜 Phase 2/4                  |
 
@@ -83,7 +84,7 @@ New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 | Esc                          | Cancel stream              | ✅     |
 | Ctrl-C / Ctrl-Q              | Quit                       | ✅     |
 | PgUp/PgDn, Ctrl-U/D, wheel   | Scroll                     | ✅     |
-| `/help`                      | Command list in status bar | 🔜     |
+| `/help`                      | Command list in status bar | ✅     |
 | `?`                          | Help overlay               | 🔜     |
-| `/model`, `/temp`            | Set params                 | 🔜     |
+| `/model`, `/temp`            | Set params                 | ✅     |
 | Ctrl-S                       | Save session               | 🔜 P2  |
