@@ -135,35 +135,27 @@ fn draw_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // VRAM + GPU widgets exist only when a usable NVIDIA GPU is present (D009).
-    let has_gpu = app.stats.vram.is_some();
-    let mut constraints = vec![
-        Constraint::Length(3), // header
-        Constraint::Length(9), // model table
-        Constraint::Min(1),    // filler
-    ];
-    if has_gpu {
-        constraints.push(Constraint::Length(3)); // VRAM
-    }
-    constraints.push(Constraint::Length(3)); // RAM
-    if has_gpu {
-        constraints.push(Constraint::Length(6)); // GPU sparkline
-    }
-    constraints.push(Constraint::Length(3)); // CTX
+    // Fixed layout — every widget keeps its slot whether or not its data
+    // source is available; unavailable sources render n/a in place (rule 9).
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints)
+        .constraints([
+            Constraint::Length(3), // header
+            Constraint::Length(9), // model table
+            Constraint::Min(1),    // filler
+            Constraint::Length(3), // VRAM
+            Constraint::Length(3), // RAM
+            Constraint::Length(6), // GPU sparkline
+            Constraint::Length(3), // CTX
+        ])
         .split(area);
-
-    let mut i = 0;
 
     // Header
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(" Veritas Agent ", Theme::sidebar_title())))
             .block(Block::default().borders(Borders::ALL).border_style(Theme::border())),
-        rows[i],
+        rows[0],
     );
-    i += 1;
 
     // Model params table — live values: engine-probed ctx, /temp override or
     // engine default (D013).
@@ -191,104 +183,72 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .border_style(Theme::border())
             .title(Span::styled(" Model ", Theme::title())),
     );
-    f.render_widget(table, rows[i]);
-    i += 1;
+    f.render_widget(table, rows[1]);
 
-    // VRAM gauge (NVIDIA only)
-    if let Some((used, total)) = app.stats.vram {
-        let ratio = if total == 0 {
-            0.0
-        } else {
-            used as f64 / total as f64
-        };
-        let gauge = Gauge::default()
-            .block(
-                Block::default()
-                    .title(format!(" VRAM {} ", gib_pair(used, total)))
-                    .borders(Borders::ALL),
-            )
+    // VRAM gauge — real when a GPU reports data, else n/a in the same slot.
+    let vram = app.stats.vram;
+    let vram_ratio = match vram {
+        Some((used, total)) if total > 0 => used as f64 / total as f64,
+        _ => 0.0,
+    };
+    let vram_title = if vram.is_some() {
+        " VRAM "
+    } else {
+        " VRAM n/a "
+    };
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default().title(vram_title).borders(Borders::ALL))
             .gauge_style(Style::default().fg(Theme::gauge_vram()))
-            .ratio(ratio.clamp(0.0, 1.0));
-        f.render_widget(gauge, rows[i]);
-        i += 1;
-    }
+            .ratio(vram_ratio.clamp(0.0, 1.0)),
+        rows[3],
+    );
 
-    // RAM gauge — always available via sysinfo (D008)
+    // RAM gauge — always available via sysinfo (D008).
     let ram_ratio = if app.stats.ram_total == 0 {
         0.0
     } else {
         app.stats.ram_used as f64 / app.stats.ram_total as f64
     };
-    let ram_title = if app.stats.ram_total == 0 {
-        " RAM n/a ".to_string()
+    f.render_widget(
+        Gauge::default()
+            .block(Block::default().title(" RAM ").borders(Borders::ALL))
+            .gauge_style(Style::default().fg(Theme::gauge_ram()))
+            .ratio(ram_ratio.clamp(0.0, 1.0)),
+        rows[4],
+    );
+
+    // GPU sparkline — real history; blank box until data exists.
+    let gpu_title = if vram.is_some() {
+        " GPU % "
     } else {
-        format!(
-            " RAM {} ",
-            gib_pair(app.stats.ram_used, app.stats.ram_total)
-        )
+        " GPU % n/a "
+    };
+    let spark = Sparkline::default()
+        .block(Block::default().title(gpu_title).borders(Borders::ALL))
+        .data(&app.stats.gpu_history)
+        .max(100);
+    f.render_widget(spark, rows[5]);
+
+    // CTX usage — ratio gauge when the window is probed; otherwise an
+    // empty gauge with an n/a label, never a fake ratio (D013 / rule 9).
+    let ctx_ratio = match app.ctx_window {
+        Some(max) if max > 0 => {
+            (app.stats.ctx_used as f64 / max as f64).clamp(0.0, 1.0)
+        }
+        _ => 0.0,
+    };
+    let ctx_title = match app.ctx_window {
+        Some(max) => format!(" CTX {}/{} ", app.stats.ctx_used, max),
+        None => format!(" CTX {} tok · n/a ", app.stats.ctx_used),
     };
     f.render_widget(
         Gauge::default()
-            .block(Block::default().title(ram_title).borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Theme::gauge_ram()))
-            .ratio(ram_ratio.clamp(0.0, 1.0)),
-        rows[i],
+            .block(Block::default().title(ctx_title).borders(Borders::ALL))
+            .gauge_style(Style::default().fg(Theme::gauge_ctx(ctx_ratio)))
+            .ratio(ctx_ratio),
+        rows[6],
     );
-    i += 1;
-
-    // GPU sparkline (NVIDIA only)
-    if has_gpu {
-        let spark = Sparkline::default()
-            .block(Block::default().title(" GPU % ").borders(Borders::ALL))
-            .data(&app.stats.gpu_history)
-            .max(100);
-        f.render_widget(spark, rows[i]);
-        i += 1;
-    }
-
-    // CTX usage. With a probed window: ratio gauge, color shifts with fill.
-    // Without one: honest token counter, no fake ratio (D013 / rule 9).
-    let area_ctx = rows[i];
-    match app.ctx_window {
-        Some(ctx_max) => {
-            let ctx_ratio =
-                (app.stats.ctx_used as f64 / ctx_max as f64).clamp(0.0, 1.0);
-            f.render_widget(
-                Gauge::default()
-                    .block(
-                        Block::default()
-                            .title(format!(
-                                " CTX {}/{} ",
-                                app.stats.ctx_used, ctx_max
-                            ))
-                            .borders(Borders::ALL),
-                    )
-                    .gauge_style(Style::default().fg(Theme::gauge_ctx(ctx_ratio)))
-                    .ratio(ctx_ratio),
-                area_ctx,
-            );
-        }
-        None => {
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!(" used {} tok · window n/a ", app.stats.ctx_used),
-                    Theme::status(),
-                )))
-                .block(
-                    Block::default()
-                        .title(" CTX ")
-                        .borders(Borders::ALL)
-                        .border_style(Theme::border()),
-                ),
-                area_ctx,
-            );
-        }
-    }
-}
-
-fn gib_pair(used: u64, total: u64) -> String {
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    format!("{:.1}/{:.1}G", used as f64 / GIB, total as f64 / GIB)
 }
 
 fn short_base(base: &str) -> String {
