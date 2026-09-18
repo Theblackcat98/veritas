@@ -100,11 +100,7 @@ fn find_amdgpu() -> Option<PathBuf> {
 }
 
 fn read_u64(path: &Path) -> Option<u64> {
-    fs::read_to_string(path)
-        .ok()?
-        .trim()
-        .parse::<u64>()
-        .ok()
+    fs::read_to_string(path).ok()?.trim().parse::<u64>().ok()
 }
 
 /// gpu_busy_percent may render as "42" or "42 %"; take the numeric token.

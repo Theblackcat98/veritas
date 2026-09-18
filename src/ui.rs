@@ -1,13 +1,13 @@
-use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Gauge, Paragraph, Row, Scrollbar, ScrollbarOrientation,
-    ScrollbarState, Sparkline, Table,
+    Block, Borders, Gauge, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    Sparkline, Table,
 };
+use ratatui::Frame;
 
-use crate::app::{Role, SPINNER_FRAMES, App, MAX_SCROLL};
+use crate::app::{App, Role, MAX_SCROLL, SPINNER_FRAMES};
 use crate::theme::Theme;
 
 /// Outer: horizontal [main | sidebar(30)].
@@ -130,7 +130,10 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 
 fn draw_spinner(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let text = if app.streaming {
-        format!(" {} Thinking… streaming (Esc to stop)", SPINNER_FRAMES[app.spinner_idx])
+        format!(
+            " {} Thinking… streaming (Esc to stop)",
+            SPINNER_FRAMES[app.spinner_idx]
+        )
     } else {
         app.status.clone()
     };
@@ -146,7 +149,10 @@ fn draw_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border())
-        .title(Span::styled(" Input — Enter send, Shift+Enter newline ", Theme::title()));
+        .title(Span::styled(
+            " Input — Enter send, Shift+Enter newline ",
+            Theme::title(),
+        ));
     app.input.set_block(block);
     f.render_widget(&app.input, area);
 }
@@ -169,8 +175,15 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     // Header
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(" Veritas Agent ", Theme::sidebar_title())))
-            .block(Block::default().borders(Borders::ALL).border_style(Theme::border())),
+        Paragraph::new(Line::from(Span::styled(
+            " Veritas Agent ",
+            Theme::sidebar_title(),
+        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Theme::border()),
+        ),
         rows[0],
     );
 
@@ -250,9 +263,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // CTX usage — ratio gauge when the window is probed; otherwise an
     // empty gauge with an n/a label, never a fake ratio (D009 / rule 9).
     let ctx_ratio = match app.ctx_window {
-        Some(max) if max > 0 => {
-            (app.stats.ctx_used as f64 / max as f64).clamp(0.0, 1.0)
-        }
+        Some(max) if max > 0 => (app.stats.ctx_used as f64 / max as f64).clamp(0.0, 1.0),
         _ => 0.0,
     };
     let ctx_title = match app.ctx_window {
@@ -269,7 +280,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn short_base(base: &str) -> String {
-    let s = base.trim_start_matches("http://").trim_start_matches("https://");
+    let s = base
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
     if s.len() > 18 {
         format!("…{}", &s[s.len() - 17..])
     } else {

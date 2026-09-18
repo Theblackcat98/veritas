@@ -1,7 +1,7 @@
 # AGENTS.md — Veritas
 
 Terminal-native TUI chat client for OpenAI-compatible APIs.
-Rust, edition 2021, ratatui 0.29. Build: `cargo build` · Check: `cargo clippy` ·
+Rust, edition 2021, ratatui 0.30. Build: `cargo build` · Check: `cargo clippy` ·
 Run: `cargo run --release`
 
 ## Read before working
@@ -32,7 +32,7 @@ defaults and any general best practices.
    `OPENAI_MODEL`) until a decision changes it. Engine-owned params
    (temperature, context window) are never client config — see D009.
 7. **Keyboard-first.** Mouse support is scroll-only; no mouse-only features.
-8. **Prefer ratatui built-in widgets** + `tui-textarea`. A new widget crate
+8. **Prefer ratatui built-in widgets** + `ratatui-textarea`. A new widget crate
    requires a DECISIONS entry.
 9. **Sidebar never fakes data** once Phase 1 telemetry lands — unavailable
    sources render `n/a` or hide their widget; no placeholder waveforms.

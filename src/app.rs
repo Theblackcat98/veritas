@@ -2,13 +2,11 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
-use ratatui::Terminal;
 use ratatui::backend::Backend;
+use ratatui::Terminal;
+use ratatui_textarea::{Input, TextArea};
 use tokio::runtime::Handle;
-use tokio::sync::mpsc::{
-    UnboundedReceiver, UnboundedSender, unbounded_channel,
-};
-use tui_textarea::{Input, TextArea};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::provider::{self, StreamEvent, WireMessage};
 use crate::sysmon::SysStats;
@@ -37,8 +35,7 @@ impl Config {
         let base_url = std::env::var("OPENAI_BASE_URL")
             .unwrap_or_else(|_| "http://localhost:11434/v1".to_string());
         let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
-        let model =
-            std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "llama3.1".to_string());
+        let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "llama3.1".to_string());
         Self {
             base_url,
             api_key,
@@ -163,8 +160,7 @@ impl<'a> App<'a> {
                 Some(v) => match v.parse::<f32>() {
                     Ok(t) if (0.0..=2.0).contains(&t) => {
                         self.temperature_override = Some(t);
-                        self.status =
-                            format!("Temperature set to {t} (overrides engine).");
+                        self.status = format!("Temperature set to {t} (overrides engine).");
                     }
                     _ => self.status = "Usage: /temp <0.0-2.0>".to_string(),
                 },
@@ -259,7 +255,10 @@ impl<'a> App<'a> {
                         self.pending.push_str(&t);
                         self.stats.ctx_used += (t.len() / 4) as u64;
                     }
-                    StreamEvent::Usage { prompt_tokens, completion_tokens } => {
+                    StreamEvent::Usage {
+                        prompt_tokens,
+                        completion_tokens,
+                    } => {
                         // Server-reported truth beats the chars/4 estimate (D009).
                         self.stats.ctx_used = prompt_tokens + completion_tokens;
                     }
@@ -304,7 +303,10 @@ impl<'a> App<'a> {
     }
 }
 
-pub fn run<B: Backend>(terminal: &mut Terminal<B>, config: Config) -> io::Result<()> {
+pub fn run<B: Backend>(terminal: &mut Terminal<B>, config: Config) -> io::Result<()>
+where
+    io::Error: From<B::Error>,
+{
     let mut app = App::new(config);
     let mut sampler = crate::sysmon::Sampler::new();
     // Sample once before the first draw so widgets never show placeholder zeros.
@@ -364,16 +366,12 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>, config: Config) -> io::Result
                     }
                     _ => {}
                 }
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('u')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
                     app.follow = false;
                     app.scroll = app.scroll.saturating_sub(10);
                     continue;
                 }
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('d')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('d') {
                     app.scroll = app.scroll.saturating_add(10).min(MAX_SCROLL);
                     continue;
                 }

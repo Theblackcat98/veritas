@@ -213,9 +213,8 @@ mod tests {
 
     #[test]
     fn chunk_without_usage_and_missing_choices_still_parses() {
-        let chunk: ChatChunk =
-            serde_json::from_str(r#"{"choices":[{"delta":{"content":"hi"}}]}"#)
-                .expect("plain chunk parses");
+        let chunk: ChatChunk = serde_json::from_str(r#"{"choices":[{"delta":{"content":"hi"}}]}"#)
+            .expect("plain chunk parses");
         assert!(chunk.usage.is_none());
         assert_eq!(chunk.choices.len(), 1);
     }
