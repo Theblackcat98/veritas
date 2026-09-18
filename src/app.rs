@@ -5,7 +5,9 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use tokio::runtime::Handle;
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::sync::mpsc::{
+    UnboundedReceiver, UnboundedSender, unbounded_channel,
+};
 use tui_textarea::{Input, TextArea};
 
 use crate::provider::{self, StreamEvent, WireMessage};
@@ -28,8 +30,6 @@ pub struct Config {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
-    pub temperature: f32,
-    pub ctx_size: u64,
 }
 
 impl Config {
@@ -39,22 +39,10 @@ impl Config {
         let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
         let model =
             std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "llama3.1".to_string());
-        let temperature = std::env::var("OPENAI_TEMPERATURE")
-            .ok()
-            .and_then(|v| v.parse::<f32>().ok())
-            .map(|t| t.clamp(0.0, 2.0))
-            .unwrap_or(0.7);
-        let ctx_size = std::env::var("OPENAI_CTX_SIZE")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .filter(|&n| n > 0)
-            .unwrap_or(8192);
         Self {
             base_url,
             api_key,
             model,
-            temperature,
-            ctx_size,
         }
     }
 }
@@ -75,13 +63,21 @@ pub struct App<'a> {
     pub stats: SysStats,
     rx: Option<UnboundedReceiver<StreamEvent>>,
     pub pending: String,
+    /// Runtime `/temp` override; None = engine's own temperature (D013).
+    pub temperature_override: Option<f32>,
+    /// Context window probed from the engine; None = unknown → sidebar
+    /// shows n/a (D013).
+    pub ctx_window: Option<u64>,
+    meta_tx: UnboundedSender<(String, Option<u64>)>,
+    meta_rx: Option<UnboundedReceiver<(String, Option<u64>)>>,
 }
 
 impl<'a> App<'a> {
     pub fn new(config: Config) -> Self {
         let mut input = TextArea::default();
         input.set_placeholder_text("Type a message — Enter to send, Shift+Enter newline…");
-        Self {
+        let (meta_tx, meta_rx) = unbounded_channel::<(String, Option<u64>)>();
+        let app = Self {
             messages: vec![ChatMessage {
                 role: Role::Agent,
                 content: "Veritas ready. Set OPENAI_BASE_URL / OPENAI_MODEL and hit Enter."
@@ -97,6 +93,35 @@ impl<'a> App<'a> {
             stats: SysStats::new(),
             rx: None,
             pending: String::new(),
+            temperature_override: None,
+            ctx_window: None,
+            meta_tx,
+            meta_rx: Some(meta_rx),
+        };
+        app.spawn_ctx_probe();
+        app
+    }
+
+    /// Ask the inference engine for the model's context window; the answer
+    /// arrives on `meta_rx` and is applied in `drain_meta` (D013).
+    fn spawn_ctx_probe(&self) {
+        let base = self.config.base_url.clone();
+        let model = self.config.model.clone();
+        let tx = self.meta_tx.clone();
+        Handle::current().spawn(async move {
+            let ctx = provider::fetch_context_length(base, model.clone()).await;
+            let _ = tx.send((model, ctx));
+        });
+    }
+
+    fn drain_meta(&mut self) {
+        if let Some(rx) = self.meta_rx.as_mut() {
+            while let Ok((model, ctx)) = rx.try_recv() {
+                // Ignore stale answers for a model we've already switched away from.
+                if model == self.config.model {
+                    self.ctx_window = ctx;
+                }
+            }
         }
     }
 
@@ -129,16 +154,28 @@ impl<'a> App<'a> {
             Some("model") => match parts.next() {
                 Some(id) => {
                     self.config.model = id.to_string();
+                    self.spawn_ctx_probe();
                     self.status = format!("Model set to {id}.");
                 }
                 None => self.status = "Usage: /model <id>".to_string(),
             },
-            Some("temp") => match parts.next().and_then(|v| v.parse::<f32>().ok()) {
-                Some(t) if (0.0..=2.0).contains(&t) => {
-                    self.config.temperature = t;
-                    self.status = format!("Temperature set to {t}.");
+            Some("temp") => match parts.next() {
+                Some(v) => match v.parse::<f32>() {
+                    Ok(t) if (0.0..=2.0).contains(&t) => {
+                        self.temperature_override = Some(t);
+                        self.status =
+                            format!("Temperature set to {t} (overrides engine).");
+                    }
+                    _ => self.status = "Usage: /temp <0.0-2.0>".to_string(),
+                },
+                None => {
+                    self.status = match self.temperature_override {
+                        Some(t) => {
+                            format!("Temperature: {t} (override; engine default otherwise)")
+                        }
+                        None => "Temperature: engine default".to_string(),
+                    };
                 }
-                _ => self.status = "Usage: /temp <0.0-2.0>".to_string(),
             },
             _ => {
                 self.status = format!("Unknown command: /{cmd} — try /help");
@@ -182,7 +219,8 @@ impl<'a> App<'a> {
         let base = self.config.base_url.clone();
         let key = self.config.api_key.clone();
         let model = self.config.model.clone();
-        let temperature = self.config.temperature;
+        // None = omit temperature from the request; engine default applies.
+        let temperature = self.temperature_override;
         // Fire-and-forget; results come back over `tx`. Dropping `rx` on
         // cancel/stop makes late sends no-ops.
         Handle::current().spawn(async move {
@@ -293,6 +331,7 @@ pub fn run<B: Backend>(terminal: &mut Terminal<B>, config: Config) -> io::Result
         }
 
         app.drain_stream();
+        app.drain_meta();
 
         if !event::poll(timeout)? {
             continue;

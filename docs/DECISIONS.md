@@ -104,7 +104,7 @@ Rules:
 
 ## D009 — NVIDIA telemetry via `nvml-wrapper`; hide widgets when absent
 - **Date:** 2026-09-17
-- **Status:** accepted
+- **Status:** superseded by D014
 - **Context:** VRAM and GPU utilization have no portable API; NVML is the
   de-facto standard for NVIDIA.
 - **Decision:** Add `nvml-wrapper` (safe NVML bindings). If `Nvml::init()`
@@ -129,7 +129,7 @@ Rules:
 
 ## D011 — Context window: `OPENAI_CTX_SIZE`; usage from stream, chars/4 fallback
 - **Date:** 2026-09-17
-- **Status:** accepted
+- **Status:** superseded by D013
 - **Context:** The CTX gauge needs a window total that the chat API does not
   expose; some servers include token `usage` in stream chunks.
 - **Decision:** Window total comes from `OPENAI_CTX_SIZE` (default 8192).
@@ -143,7 +143,7 @@ Rules:
 
 ## D012 — Runtime model params: temperature config + `/model`, `/temp` overrides
 - **Date:** 2026-09-17
-- **Status:** accepted
+- **Status:** superseded by D013
 - **Context:** `provider.rs` hardcoded temperature 0.7 and the sidebar showed
   a fake temp; ROADMAP Phase 1 wants real params from config.
 - **Decision:** Temperature comes from `OPENAI_TEMPERATURE` (default 0.7).
@@ -152,3 +152,37 @@ Rules:
 - **Consequences:** Extends D001's env-var surface. `/model` does not
   validate the id against the server — bad ids surface as errors on next
   send.
+
+## D013 — Temperature and context window belong to the engine, not config
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** D011/D012 added `OPENAI_CTX_SIZE` and `OPENAI_TEMPERATURE`
+  env vars; review rejected client-side config of engine-owned params — a
+  wrong env var makes the gauge lie, and always sending temperature
+  overrides the engine's own default.
+- **Decision:** Supersedes D011/D012. Config returns to the D001 trio.
+  Requests omit `temperature` unless the user sets a runtime override via
+  `/temp <f>` (bare `/temp` reports the effective setting). The context
+  window is probed best-effort from the engine at startup and on `/model`:
+  Ollama `POST {root}/api/show` — `num_ctx` from `parameters` if present,
+  else `context_length` (top-level, or `<arch>.context_length` in
+  `model_info`). When unknown, the sidebar shows used tokens with window
+  `n/a` and no ratio gauge (rule 9).
+- **Consequences:** provider.rs makes one Ollama-specific metadata call,
+  widening D004's chat-completions-only scope deliberately; other engines
+  silently fall back to `n/a`. No retry logic on the probe.
+
+## D014 — GPU telemetry via amdgpu DRM sysfs; `nvml-wrapper` dropped
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** The primary user's GPU is AMD; `nvml-wrapper` (D009) is
+  NVIDIA-only and would ride along as dead weight. sysinfo's newer `Gpus`
+  API is unreleased (not in 0.39).
+- **Decision:** Supersedes D009. GPU telemetry reads the kernel's DRM sysfs
+  (`/sys/class/drm/cardN/device`: `vendor` `0x1002`,
+  `mem_info_vram_used`, `mem_info_vram_total`, `gpu_busy_percent`); among
+  multiple AMD cards the one with the largest reported VRAM wins (prefers
+  dGPU over iGPU carve-outs). No new dependency; `nvml-wrapper` removed.
+- **Consequences:** Linux + amdgpu only; on anything else the VRAM/GPU
+  widgets stay hidden (rule 9). NVIDIA support can return via a future
+  decision.

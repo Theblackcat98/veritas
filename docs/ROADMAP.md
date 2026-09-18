@@ -21,11 +21,13 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 (show `n/a`, hide widgets, never crash):
 
 - RAM via `sysinfo` crate ✅
-- VRAM + GPU% via `nvml-wrapper` (NVIDIA); hide widget when no NVIDIA GPU ✅
+- VRAM + GPU% via amdgpu DRM sysfs (AMD); hide widgets when no GPU reports
+  data ✅
 - Real context size: parse `usage` from stream chunks when the server sends
   it; keep the chars/4 estimate as fallback ✅
-- Real model params in the sidebar table (temperature etc. from config,
-  not hardcoded) ✅
+- Real model params in the sidebar table — temperature is engine-owned
+  (omitted from requests unless `/temp` overrides), ctx window probed from
+  the engine ✅
 - `/help`, `/model <id>`, `/temp <f>` slash commands with status-line
   feedback ✅
 - CTX gauge color shift (green → yellow → red) as the window fills ✅

@@ -165,10 +165,17 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     );
     i += 1;
 
-    // Model params table — live config values, not hardcoded (D012).
+    // Model params table — live values: engine-probed ctx, /temp override or
+    // engine default (D013).
     let base_short = short_base(&app.config.base_url);
-    let temp_str = format!("{}", app.config.temperature);
-    let ctx_str = format!("{} tok", app.config.ctx_size);
+    let temp_str = match app.temperature_override {
+        Some(t) => t.to_string(),
+        None => "engine".to_string(),
+    };
+    let ctx_str = match app.ctx_window {
+        Some(n) => format!("{n} tok"),
+        None => "n/a".to_string(),
+    };
     let table = Table::new(
         vec![
             Row::new(vec!["model", app.config.model.as_str()]),
@@ -239,24 +246,44 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         i += 1;
     }
 
-    // CTX usage — real window from config (D011), color shifts with fill (D003).
-    let ctx_max = app.config.ctx_size;
-    let ctx_ratio = if ctx_max == 0 {
-        0.0
-    } else {
-        (app.stats.ctx_used as f64 / ctx_max as f64).clamp(0.0, 1.0)
-    };
-    f.render_widget(
-        Gauge::default()
-            .block(
-                Block::default()
-                    .title(format!(" CTX {}/{} ", app.stats.ctx_used, ctx_max))
-                    .borders(Borders::ALL),
-            )
-            .gauge_style(Style::default().fg(Theme::gauge_ctx(ctx_ratio)))
-            .ratio(ctx_ratio),
-        rows[i],
-    );
+    // CTX usage. With a probed window: ratio gauge, color shifts with fill.
+    // Without one: honest token counter, no fake ratio (D013 / rule 9).
+    let area_ctx = rows[i];
+    match app.ctx_window {
+        Some(ctx_max) => {
+            let ctx_ratio =
+                (app.stats.ctx_used as f64 / ctx_max as f64).clamp(0.0, 1.0);
+            f.render_widget(
+                Gauge::default()
+                    .block(
+                        Block::default()
+                            .title(format!(
+                                " CTX {}/{} ",
+                                app.stats.ctx_used, ctx_max
+                            ))
+                            .borders(Borders::ALL),
+                    )
+                    .gauge_style(Style::default().fg(Theme::gauge_ctx(ctx_ratio)))
+                    .ratio(ctx_ratio),
+                area_ctx,
+            );
+        }
+        None => {
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!(" used {} tok · window n/a ", app.stats.ctx_used),
+                    Theme::status(),
+                )))
+                .block(
+                    Block::default()
+                        .title(" CTX ")
+                        .borders(Borders::ALL)
+                        .border_style(Theme::border()),
+                ),
+                area_ctx,
+            );
+        }
+    }
 }
 
 fn gib_pair(used: u64, total: u64) -> String {

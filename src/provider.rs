@@ -25,7 +25,10 @@ struct ChatRequest {
     model: String,
     messages: Vec<WireMessage>,
     stream: bool,
-    temperature: f32,
+    /// Omitted entirely unless the user overrides via /temp — the engine's
+    /// own temperature then applies (D013).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,7 +63,7 @@ pub async fn stream_chat(
     base: String,
     api_key: String,
     model: String,
-    temperature: f32,
+    temperature: Option<f32>,
     history: Vec<WireMessage>,
     tx: UnboundedSender<StreamEvent>,
 ) {
@@ -148,6 +151,50 @@ pub async fn stream_chat(
     let _ = tx.send(StreamEvent::Done);
 }
 
+/// Best-effort probe of the model's context window from the inference
+/// engine (D013). Ollama-only today — the charter's default local target:
+/// `POST {root}/api/show` on the base URL with `/v1` stripped. Returns None
+/// on any other engine or any error; the sidebar then shows `n/a`.
+pub async fn fetch_context_length(base: String, model: String) -> Option<u64> {
+    let trimmed = base.trim_end_matches('/');
+    let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
+    let url = format!("{root}/api/show");
+    let resp = Client::new()
+        .post(&url)
+        .json(&serde_json::json!({ "model": model }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().await.ok()?;
+    parse_context_length(&v)
+}
+
+fn parse_context_length(v: &serde_json::Value) -> Option<u64> {
+    // `num_ctx` in `parameters` is the engine's effective window when set;
+    // it caps the model's native context length, so it wins.
+    if let Some(params) = v.get("parameters").and_then(|p| p.as_str()) {
+        for line in params.lines() {
+            let mut parts = line.split_whitespace();
+            if parts.next() == Some("num_ctx") {
+                if let Some(n) = parts.next().and_then(|s| s.parse::<u64>().ok()) {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    let info = v.get("model_info")?;
+    if let Some(n) = info.get("context_length").and_then(|x| x.as_u64()) {
+        return Some(n);
+    }
+    info.as_object()?
+        .iter()
+        .find(|(k, _)| k.ends_with(".context_length"))
+        .and_then(|(_, val)| val.as_u64())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +218,55 @@ mod tests {
                 .expect("plain chunk parses");
         assert!(chunk.usage.is_none());
         assert_eq!(chunk.choices.len(), 1);
+    }
+
+    #[test]
+    fn temperature_omitted_from_request_when_unset() {
+        let req = ChatRequest {
+            model: "m".to_string(),
+            messages: vec![],
+            stream: true,
+            temperature: None,
+        };
+        let v = serde_json::to_value(&req).expect("serializes");
+        assert!(v.get("temperature").is_none());
+    }
+
+    #[test]
+    fn temperature_included_when_overridden() {
+        let req = ChatRequest {
+            model: "m".to_string(),
+            messages: vec![],
+            stream: true,
+            temperature: Some(0.5),
+        };
+        let v = serde_json::to_value(&req).expect("serializes");
+        assert_eq!(v.get("temperature"), Some(&serde_json::json!(0.5)));
+    }
+
+    #[test]
+    fn context_length_from_arch_keyed_model_info() {
+        let v = serde_json::json!({
+            "model_info": {
+                "general.architecture": "llama",
+                "llama.context_length": 131072
+            }
+        });
+        assert_eq!(parse_context_length(&v), Some(131072));
+    }
+
+    #[test]
+    fn num_ctx_in_parameters_wins() {
+        let v = serde_json::json!({
+            "parameters": "stop <|im_end|>\nnum_ctx 8192\ntemperature 0.7",
+            "model_info": { "llama.context_length": 131072 }
+        });
+        assert_eq!(parse_context_length(&v), Some(8192));
+    }
+
+    #[test]
+    fn context_length_absent_is_none() {
+        let v = serde_json::json!({ "model_info": {} });
+        assert_eq!(parse_context_length(&v), None);
     }
 }
