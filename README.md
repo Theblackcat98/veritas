@@ -23,13 +23,13 @@ Everything comes from environment variables:
 |---|---|---|
 | `OPENAI_BASE_URL` | `http://localhost:11434/v1` | API base (Ollama default shown) |
 | `OPENAI_API_KEY` | *(empty)* | Bearer token; omitted from requests when unset |
-| `OPENAI_MODEL` | `llama3.1` | Model id |
+| `OPENAI_MODEL` | `jan-nano` | Model id |
 
 ## Run
 
 ```sh
 export OPENAI_BASE_URL="http://localhost:11434/v1"
-export OPENAI_MODEL="llama3.1"
+export OPENAI_MODEL="jan-nano"
 cargo run --release
 ```
 
