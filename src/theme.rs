@@ -88,4 +88,38 @@ impl Theme {
             .fg(Color::Green)
             .add_modifier(Modifier::ITALIC)
     }
+    /// Heading level 1 style
+    pub fn md_h1() -> Style {
+        Style::default()
+            .fg(Color::LightMagenta)
+            .add_modifier(Modifier::BOLD)
+    }
+    /// Heading level 2 style
+    pub fn md_h2() -> Style {
+        Style::default()
+            .fg(Color::LightCyan)
+            .add_modifier(Modifier::BOLD)
+    }
+    /// Heading level 3 style
+    pub fn md_h3() -> Style {
+        Style::default()
+            .fg(Color::LightYellow)
+            .add_modifier(Modifier::ITALIC)
+    }
+    /// Bold text with color
+    pub fn md_bold() -> Style {
+        Style::default()
+            .fg(Color::LightRed)
+            .add_modifier(Modifier::BOLD)
+    }
+    /// Italic text with color
+    pub fn md_italic() -> Style {
+        Style::default()
+            .fg(Color::LightBlue)
+            .add_modifier(Modifier::ITALIC)
+    }
+    /// Horizontal rule style
+    pub fn md_hr() -> Style {
+        Style::default().fg(Color::DarkGray)
+    }
 }

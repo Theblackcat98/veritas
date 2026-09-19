@@ -85,6 +85,8 @@ pub struct App<'a> {
     last_saved_len: usize,
     /// Open picker overlay; while `Some`, every key routes to it (D013).
     pub picker: Option<Picker>,
+    /// Open help overlay; while `true`, every key routes to it (Esc closes).
+    pub help_open: bool,
     /// Phase (0.0..1.0) of the streaming shimmer sweep (D017).
     pub shimmer_phase: f32,
     meta_tx: UnboundedSender<(String, Option<u64>)>,
@@ -118,6 +120,7 @@ impl<'a> App<'a> {
             session_created: 0,
             last_saved_len: 0,
             picker: None,
+            help_open: false,
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: Some(meta_rx),
@@ -217,6 +220,16 @@ impl<'a> App<'a> {
         self.picker = None;
     }
 
+    /// Open the help overlay.
+    pub fn open_help(&mut self) {
+        self.help_open = true;
+    }
+
+    /// Close the help overlay.
+    pub fn close_help(&mut self) {
+        self.help_open = false;
+    }
+
     /// Modal key routing while the picker is open (D013).
     pub fn handle_picker_key(&mut self, code: KeyCode) {
         match code {
@@ -262,8 +275,7 @@ impl<'a> App<'a> {
                 self.session_created = created;
                 self.last_saved_len = self.messages.len();
                 self.stats.ctx_used = (chars / 4) as u64;
-                self.follow = true;
-                self.scroll = 0;
+                self.follow = true; // Follow mode pins to bottom, no need to set scroll
                 self.status = format!(
                     "Loaded “{}” · {} msgs",
                     self.session_title.as_deref().unwrap_or("session"),
@@ -318,8 +330,7 @@ impl<'a> App<'a> {
                 self.status = "Cleared.".to_string();
             }
             Some("help") => {
-                self.status = "Commands: /clear · /sessions · /export <file> · /model <id> · /temp <0.0-2.0> · /help"
-                    .to_string();
+                self.open_help();
             }
             Some("sessions") => self.open_picker(),
             Some("export") => match parts.next() {
@@ -535,11 +546,23 @@ where
                     app.handle_picker_key(key.code);
                     continue;
                 }
+                // Help overlay is modal: Esc closes it.
+                if app.help_open {
+                    if key.code == KeyCode::Esc {
+                        app.close_help();
+                    }
+                    continue;
+                }
                 // Ctrl-S: save-then-list the sessions (D012/D013).
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     && key.code == KeyCode::Char('s')
                 {
                     app.open_picker();
+                    continue;
+                }
+                // ?: show help overlay
+                if key.code == KeyCode::Char('?') {
+                    app.open_help();
                     continue;
                 }
                 match key.code {
@@ -550,10 +573,13 @@ where
                     KeyCode::PageUp => {
                         app.follow = false;
                         app.scroll = app.scroll.saturating_sub(10);
+                        // Clamp will happen in render based on actual content height
                         continue;
                     }
                     KeyCode::PageDown => {
+                        app.follow = false;
                         app.scroll = app.scroll.saturating_add(10).min(MAX_SCROLL);
+                        // Clamp will happen in render based on actual content height
                         continue;
                     }
                     KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {

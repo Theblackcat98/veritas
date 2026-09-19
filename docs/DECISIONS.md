@@ -247,3 +247,47 @@ Rules:
   Base style comes from `Theme::spinner()`.
 - **Consequences:** One more dependency for a cosmetic effect, accepted by owner.
   Shimmer renders only while streaming; idle status line stays static.
+
+## D018 — Scroll behavior fixes and help overlay
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** User reported scroll issues: (1) scrolling past bottom required equal
+  upward scrolling to recover, (2) loading sessions jumped to top instead of following
+  tail. Also requested help overlay styled like session picker.
+- **Decision:** Clamp scroll value to actual content height on each render to prevent
+  accumulation beyond valid range. Session loading sets `follow = true` and resets scroll
+  to 0, letting follow-tail logic pin to bottom. Help overlay added as modal popup using
+  same centered Clear+Paragraph pattern as session picker (D013), triggered by `/help`
+  command and `?` key. Shows all keybindings and commands with theme colors.
+- **Consequences:** No new dependencies. Scroll behavior now respects content boundaries.
+  Help overlay uses existing widgets and follows established modal pattern. UX improved
+  without architectural changes.
+
+## D019 — Enhanced markdown styling
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** User requested better markdown styling: headings need distinct colors,
+  bold/italic need colors added to modifiers, code blocks need better formatting,
+  horizontal rules need styling. Current tui-markdown integration uses minimal hooks.
+- **Decision:** Extend `VeritasMd` StyleSheet with heading-level-specific styles
+  (`md_h1`, `md_h2`, `md_h3`), table styling hooks (`table_header`, `table_cell`,
+  `table_border`), and post-process rendered lines to add colors to bold/italic spans.
+  Re-enable heading markers and code block fences for visual distinction. Add horizontal
+  rule detection and styling via post-processing (tui-markdown doesn't have HR hook).
+  Code blocks styled via `md_code` (D015). All new styles follow rule 4 (colors in theme.rs only).
+- **Consequences:** No new dependencies. Better visual hierarchy in markdown content.
+  Post-processing adds colors to bold/italic while preserving tui-markdown's modifiers.
+  Tables now use theme colors for headers and borders. Horizontal rules render as styled
+  lines (─). Heading markers and code fences now visible with appropriate colors.
+
+## D020 — Session picker styling consistency
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** User requested session picker styling to match the new help overlay
+  styling for visual consistency across modals.
+- **Decision:** Apply similar styling pattern to session picker: use bullet points (●)
+  with heading colors (md_h2) for session titles, code style (md_code) for metadata
+  (message counts, ages), italic style (md_italic) for empty state hint. Add black
+  background to block for consistency with help overlay.
+- **Consequences:** No new dependencies. Session picker now visually matches help overlay
+  using existing theme tokens. Improved readability and UI consistency.

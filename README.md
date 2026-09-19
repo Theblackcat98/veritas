@@ -54,7 +54,7 @@ Type in the input box:
 
 | Command | Effect |
 |---|---|
-| `/help` | List commands in the status line |
+| `/help` | Show help overlay (keybindings and commands) |
 | `/sessions` | Open the session picker (same as Ctrl-S) |
 | `/export <file>` | Write the transcript as markdown |
 | `/model <id>` | Switch model (takes effect on next send; re-probes ctx window) |
@@ -80,6 +80,7 @@ cargo run --release
 ## Keys
 
 - `Enter` — send · `Shift+Enter` — newline
-- `Esc` — stop streaming · `Ctrl-S` — session picker · `Ctrl-C` / `Ctrl-Q` — quit
+- `Esc` — stop streaming / close overlays · `Ctrl-S` — session picker · `Ctrl-C` / `Ctrl-Q` — quit
+- `?` — show help overlay
 - `PgUp`/`PgDn` or `Ctrl-U`/`Ctrl-D` or mouse wheel — scroll
 - In the picker: `↑`/`↓` select · `PgUp`/`PgDn` jump · `Enter` load · `Esc` cancel

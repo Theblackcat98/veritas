@@ -1,5 +1,5 @@
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Scrollbar,
@@ -39,6 +39,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.picker.is_some() {
         draw_picker(f, app, f.area());
     }
+    if app.help_open {
+        draw_help(f, app, f.area());
+    }
 }
 
 /// Centered modal session picker: `Clear` punches a hole in the buffer
@@ -68,23 +71,24 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let now = session::now_unix();
 
     let items: Vec<ListItem> = if picker.entries.is_empty() {
-        vec![ListItem::new(Line::from(Span::styled(
-            "  No saved sessions yet — chat, then press Ctrl-S.",
-            Theme::picker_dim(),
-        )))]
+        vec![ListItem::new(Line::from(vec![
+            Span::styled("● ", Theme::md_h2()),
+            Span::styled("No saved sessions yet — chat, then press Ctrl-S.", Theme::md_italic()),
+        ]))]
     } else {
         picker
             .entries
             .iter()
             .map(|e| {
                 ListItem::new(Line::from(vec![
+                    Span::styled("● ", Theme::md_h2()),
                     Span::styled(
-                        format!(" {} ", truncate_chars(&e.title, 32)),
-                        Theme::agent_text(),
+                        format!("{} ", truncate_chars(&e.title, 32)),
+                        Theme::md_h2(), // Use heading style for titles
                     ),
                     Span::styled(
                         format!("· {} msgs · {}", e.msg_count, session::rel_time(e.updated_at, now)),
-                        Theme::picker_dim(),
+                        Theme::md_code(), // Use code style for metadata
                     ),
                 ]))
             })
@@ -99,7 +103,8 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 .title(Span::styled(
                     " Sessions — ↑/↓ select · Enter load · Esc cancel ",
                     Theme::title(),
-                )),
+                ))
+                .style(Style::default().bg(Color::Black)),
         )
         .highlight_style(Theme::picker_selected());
     let mut state = ListState::default();
@@ -117,6 +122,110 @@ fn truncate_chars(s: &str, max: usize) -> String {
         out.push('…');
         out
     }
+}
+
+/// Centered help overlay showing all keybindings (like the session picker).
+fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
+    // 70% width, 70% height, centered.
+    let vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(15),
+            Constraint::Percentage(70),
+            Constraint::Percentage(15),
+        ])
+        .split(area);
+    let horiz = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(15),
+            Constraint::Percentage(70),
+            Constraint::Percentage(15),
+        ])
+        .split(vert[1]);
+
+    let popup = horiz[1];
+
+    let help_text = vec![
+        Line::from(Span::styled(" Keybindings ", Theme::title())),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" Enter ", Theme::md_code()),
+            Span::styled(" – Send message ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" Shift+Enter ", Theme::md_code()),
+            Span::styled(" – Newline in input ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" Esc ", Theme::md_code()),
+            Span::styled(" – Cancel stream / Close overlay ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" Ctrl-C / Ctrl-Q ", Theme::md_code()),
+            Span::styled(" – Quit ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" PgUp / PgDn ", Theme::md_code()),
+            Span::styled(" – Scroll transcript ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" Ctrl-U / Ctrl-D ", Theme::md_code()),
+            Span::styled(" – Scroll up/down 10 lines ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" Ctrl-S ", Theme::md_code()),
+            Span::styled(" – Open session picker ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" ? ", Theme::md_code()),
+            Span::styled(" – Show this help ", Theme::agent_text()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(" Commands ", Theme::title())),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" /help ", Theme::md_code()),
+            Span::styled(" – Show this help ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" /clear ", Theme::md_code()),
+            Span::styled(" – Clear transcript ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" /sessions ", Theme::md_code()),
+            Span::styled(" – Open session picker ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" /export <file> ", Theme::md_code()),
+            Span::styled(" – Export transcript as markdown ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" /model <id> ", Theme::md_code()),
+            Span::styled(" – Set model ", Theme::agent_text()),
+        ]),
+        Line::from(vec![
+            Span::styled(" /temp <0.0-2.0> ", Theme::md_code()),
+            Span::styled(" – Set temperature (overrides engine) ", Theme::agent_text()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Press Esc to close ",
+            Theme::picker_dim(),
+        )),
+    ];
+
+    let para = Paragraph::new(help_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Theme::border())
+                .title(Span::styled(" Help — Esc to close ", Theme::title())),
+        )
+        .style(Style::default().bg(Color::Black));
+    
+    f.render_widget(Clear, popup);
+    f.render_widget(para, popup);
 }
 
 /// Wrap one logical line to the transcript's inner width and push every
@@ -196,10 +305,17 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let view = view_h.max(1) as usize;
     // MAX_SCROLL also keeps `area.height + scroll.y` inside u16 (D007).
     let max_scroll = total.saturating_sub(view).min(MAX_SCROLL as usize);
+    
+    // Clamp scroll to actual content height to prevent scrolling past bottom
+    // This fixes the issue where scroll can accumulate beyond content height
+    if !app.follow {
+        app.scroll = (app.scroll as usize).min(max_scroll) as u16;
+    }
+    
     let scroll = if app.follow {
         max_scroll
     } else {
-        (app.scroll as usize).min(max_scroll)
+        app.scroll as usize
     } as u16;
 
     let para = Paragraph::new(rows)
