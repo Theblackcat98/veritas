@@ -1,125 +1,223 @@
 use ratatui::style::{Color, Modifier, Style};
 
-/// Single place to reskin the app. Mockup colors were structural only,
-/// so everything here is a neutral default. Tweak freely.
+/// Single place to reskin the app. The UI consumes semantic roles from this
+/// type instead of choosing colors for individual widgets.
 pub struct Theme;
 
 impl Theme {
-    pub fn border() -> Style {
-        Style::default().fg(Color::DarkGray)
+    // Surfaces
+    pub fn canvas() -> Style {
+        Style::default().bg(Color::Rgb(8, 12, 16))
     }
+
+    pub fn panel() -> Style {
+        Style::default().bg(Color::Rgb(15, 23, 29))
+    }
+
+    pub fn modal_surface() -> Style {
+        Style::default().bg(Color::Rgb(17, 29, 36))
+    }
+
+    pub fn code_surface() -> Style {
+        Style::default().bg(Color::Rgb(22, 33, 42))
+    }
+
+    // Chrome
+    pub fn border() -> Style {
+        Style::default().fg(Color::Rgb(51, 67, 78))
+    }
+
+    pub fn border_focus() -> Style {
+        Style::default().fg(Color::Rgb(34, 211, 238))
+    }
+
     pub fn title() -> Style {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(Color::Rgb(34, 211, 238))
             .add_modifier(Modifier::BOLD)
     }
+
+    pub fn section_title() -> Style {
+        Style::default()
+            .fg(Color::Rgb(45, 212, 191))
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn separator() -> Style {
+        Style::default().fg(Color::Rgb(100, 116, 139))
+    }
+
+    // Text
+    pub fn text() -> Style {
+        Style::default().fg(Color::Rgb(230, 237, 243))
+    }
+
+    pub fn muted() -> Style {
+        Style::default().fg(Color::Rgb(148, 163, 184))
+    }
+
+    pub fn faint() -> Style {
+        Style::default().fg(Color::Rgb(100, 116, 139))
+    }
+
+    pub fn hint() -> Style {
+        Self::faint()
+    }
+
+    // Interaction
+    pub fn key_hint() -> Style {
+        Style::default()
+            .fg(Color::Rgb(8, 12, 16))
+            .bg(Color::Rgb(34, 211, 238))
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn command_hint() -> Style {
+        Style::default()
+            .fg(Color::Rgb(125, 211, 252))
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn selected_row() -> Style {
+        Style::default()
+            .fg(Color::Rgb(8, 12, 16))
+            .bg(Color::Rgb(34, 211, 238))
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn empty_state() -> Style {
+        Self::muted()
+    }
+
+    // Conversation
     pub fn user_label() -> Style {
         Style::default()
-            .fg(Color::LightBlue)
+            .fg(Color::Rgb(125, 211, 252))
             .add_modifier(Modifier::BOLD)
     }
+
     pub fn agent_label() -> Style {
         Style::default()
-            .fg(Color::LightGreen)
+            .fg(Color::Rgb(167, 243, 208))
             .add_modifier(Modifier::BOLD)
     }
+
     pub fn user_text() -> Style {
-        Style::default().fg(Color::White)
+        Self::text()
     }
+
     pub fn agent_text() -> Style {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(Color::Rgb(203, 213, 225))
     }
+
+    // State
     pub fn status() -> Style {
-        Style::default().fg(Color::DarkGray)
+        Self::faint()
     }
-    pub fn separator() -> Style {
-        Style::default().fg(Color::DarkGray)
+
+    pub fn activity() -> Style {
+        Style::default()
+            .fg(Color::Rgb(251, 191, 36))
+            .add_modifier(Modifier::BOLD)
     }
+
     pub fn spinner() -> Style {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
+        Self::activity()
     }
-    pub fn sidebar_title() -> Style {
-        Style::default()
-            .fg(Color::Magenta)
-            .add_modifier(Modifier::BOLD)
+
+    pub fn success() -> Style {
+        Style::default().fg(Color::Rgb(52, 211, 153))
     }
-    pub fn gauge_vram() -> Color {
-        Color::Yellow
+
+    pub fn warning() -> Style {
+        Style::default().fg(Color::Rgb(245, 158, 11))
     }
-    pub fn gauge_ram() -> Color {
-        Color::Blue
+
+    pub fn error() -> Style {
+        Style::default().fg(Color::Rgb(248, 113, 113))
     }
-    /// Picker selection highlight (session list rows).
-    pub fn picker_selected() -> Style {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
+
+    // Telemetry
+    pub fn gauge_vram() -> Style {
+        Style::default().fg(Color::Rgb(45, 212, 191))
     }
-    /// Dimmed metadata text in the picker (ages, counts, hints).
-    pub fn picker_dim() -> Style {
-        Style::default().fg(Color::DarkGray)
+
+    pub fn gauge_ram() -> Style {
+        Style::default().fg(Color::Rgb(125, 211, 252))
     }
-    /// CTX gauge shifts green → yellow → red as the window fills.
-    pub fn gauge_ctx(ratio: f64) -> Color {
+
+    pub fn gauge_gpu() -> Style {
+        Style::default().fg(Color::Rgb(45, 212, 191))
+    }
+
+    /// CTX gauge shifts success → warning → error as the window fills.
+    pub fn gauge_ctx(ratio: f64) -> Style {
         if ratio >= 0.9 {
-            Color::Red
+            Self::error()
         } else if ratio >= 0.7 {
-            Color::Yellow
+            Self::warning()
         } else {
-            Color::Green
+            Self::success()
         }
     }
-    /// Inline `code` spans and fenced blocks in agent messages (D015).
-    pub fn md_code() -> Style {
-        Style::default().fg(Color::LightCyan)
+
+    pub fn telemetry_value() -> Style {
+        Self::text()
     }
-    /// Link labels in agent messages (D015).
+
+    pub fn telemetry_unavailable() -> Style {
+        Self::faint()
+    }
+
+    // Markdown
+    pub fn md_code() -> Style {
+        Self::code_surface().fg(Color::Rgb(125, 211, 252))
+    }
+
     pub fn md_link() -> Style {
         Style::default()
-            .fg(Color::LightBlue)
+            .fg(Color::Rgb(125, 211, 252))
             .add_modifier(Modifier::UNDERLINED)
     }
-    /// Blockquoted lines in agent messages (D015).
+
     pub fn md_blockquote() -> Style {
         Style::default()
-            .fg(Color::Green)
+            .fg(Color::Rgb(167, 243, 208))
             .add_modifier(Modifier::ITALIC)
     }
-    /// Heading level 1 style
+
     pub fn md_h1() -> Style {
         Style::default()
-            .fg(Color::LightMagenta)
+            .fg(Color::Rgb(34, 211, 238))
             .add_modifier(Modifier::BOLD)
     }
-    /// Heading level 2 style
+
     pub fn md_h2() -> Style {
         Style::default()
-            .fg(Color::LightCyan)
+            .fg(Color::Rgb(45, 212, 191))
             .add_modifier(Modifier::BOLD)
     }
-    /// Heading level 3 style
+
     pub fn md_h3() -> Style {
         Style::default()
-            .fg(Color::LightYellow)
+            .fg(Color::Rgb(251, 191, 36))
             .add_modifier(Modifier::ITALIC)
-    }
-    /// Bold text with color
-    pub fn md_bold() -> Style {
-        Style::default()
-            .fg(Color::LightRed)
             .add_modifier(Modifier::BOLD)
     }
-    /// Italic text with color
+
+    pub fn md_bold() -> Style {
+        Style::default()
+            .fg(Color::Rgb(230, 237, 243))
+            .add_modifier(Modifier::BOLD)
+    }
+
     pub fn md_italic() -> Style {
         Style::default()
-            .fg(Color::LightBlue)
+            .fg(Color::Rgb(148, 163, 184))
             .add_modifier(Modifier::ITALIC)
     }
-    /// Horizontal rule style
+
     pub fn md_hr() -> Style {
-        Style::default().fg(Color::DarkGray)
+        Self::faint()
     }
 }

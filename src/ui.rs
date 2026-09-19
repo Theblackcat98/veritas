@@ -1,5 +1,5 @@
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Style};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Scrollbar,
@@ -16,6 +16,8 @@ use crate::theme::Theme;
 /// Main: vertical [transcript | spinner(1) | input(6)].
 /// Sidebar: vertical [header(3) | model table(8) | spacer | gauges].
 pub fn draw(f: &mut Frame, app: &mut App) {
+    f.render_widget(Block::default().style(Theme::canvas()), f.area());
+
     let outer = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(40), Constraint::Length(32)])
@@ -42,6 +44,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.help_open {
         draw_help(f, app, f.area());
     }
+}
+
+/// Shared centered modal frame for keyboard-first overlays.
+fn modal_block(title: &str) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focus())
+        .style(Theme::modal_surface())
+        .title(Span::styled(format!(" {title} "), Theme::title()))
 }
 
 /// Centered modal session picker: `Clear` punches a hole in the buffer
@@ -72,8 +83,8 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 
     let items: Vec<ListItem> = if picker.entries.is_empty() {
         vec![ListItem::new(Line::from(vec![
-            Span::styled("● ", Theme::md_h2()),
-            Span::styled("No saved sessions yet — chat, then press Ctrl-S.", Theme::md_italic()),
+            Span::styled("No saved sessions yet. ", Theme::empty_state()),
+            Span::styled("Chat, then press Ctrl-S.", Theme::hint()),
         ]))]
     } else {
         picker
@@ -81,36 +92,45 @@ fn draw_picker(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             .iter()
             .map(|e| {
                 ListItem::new(Line::from(vec![
-                    Span::styled("● ", Theme::md_h2()),
+                    Span::styled(truncate_chars(&e.title, 32), Theme::text()),
                     Span::styled(
-                        format!("{} ", truncate_chars(&e.title, 32)),
-                        Theme::md_h2(), // Use heading style for titles
-                    ),
-                    Span::styled(
-                        format!("· {} msgs · {}", e.msg_count, session::rel_time(e.updated_at, now)),
-                        Theme::md_code(), // Use code style for metadata
+                        format!(
+                            "  · {} msgs · {}",
+                            e.msg_count,
+                            session::rel_time(e.updated_at, now)
+                        ),
+                        Theme::faint(),
                     ),
                 ]))
             })
             .collect()
     };
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Theme::border())
-                .title(Span::styled(
-                    " Sessions — ↑/↓ select · Enter load · Esc cancel ",
-                    Theme::title(),
-                ))
-                .style(Style::default().bg(Color::Black)),
-        )
-        .highlight_style(Theme::picker_selected());
-    let mut state = ListState::default();
-    state.select(Some(picker.selected));
+    let modal = modal_block("Sessions");
+    let inner = modal.inner(popup);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
     f.render_widget(Clear, popup);
-    f.render_stateful_widget(list, popup, &mut state);
+    f.render_widget(modal, popup);
+
+    let list = List::new(items)
+        .style(Theme::modal_surface())
+        .highlight_style(Theme::selected_row())
+        .highlight_symbol("› ");
+    let mut state = ListState::default();
+    if !picker.entries.is_empty() {
+        state.select(Some(picker.selected));
+    }
+    f.render_stateful_widget(list, sections[0], &mut state);
+    f.render_widget(
+        Paragraph::new("↑↓ navigate · PgUp/PgDn jump · Enter load · Esc close")
+            .style(Theme::hint())
+            .alignment(Alignment::Right),
+        sections[1],
+    );
 }
 
 /// Char-boundary-safe truncation for picker rows.
@@ -130,9 +150,9 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
     let vert = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(15),
-            Constraint::Percentage(70),
-            Constraint::Percentage(15),
+            Constraint::Percentage(10),
+            Constraint::Percentage(80),
+            Constraint::Percentage(10),
         ])
         .split(area);
     let horiz = Layout::default()
@@ -145,87 +165,89 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
         .split(vert[1]);
 
     let popup = horiz[1];
-
     let help_text = vec![
-        Line::from(Span::styled(" Keybindings ", Theme::title())),
+        Line::from(Span::styled("KEYBOARD", Theme::section_title())),
         Line::from(""),
         Line::from(vec![
-            Span::styled(" Enter ", Theme::md_code()),
-            Span::styled(" – Send message ", Theme::agent_text()),
+            Span::styled("Enter", Theme::key_hint()),
+            Span::styled("  Send message", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" Shift+Enter ", Theme::md_code()),
-            Span::styled(" – Newline in input ", Theme::agent_text()),
+            Span::styled("Shift+Enter", Theme::key_hint()),
+            Span::styled("  Newline in input", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" Esc ", Theme::md_code()),
-            Span::styled(" – Cancel stream / Close overlay ", Theme::agent_text()),
+            Span::styled("Esc", Theme::key_hint()),
+            Span::styled("  Cancel stream / close overlay", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" Ctrl-C / Ctrl-Q ", Theme::md_code()),
-            Span::styled(" – Quit ", Theme::agent_text()),
+            Span::styled("Ctrl-C / Ctrl-Q", Theme::key_hint()),
+            Span::styled("  Quit", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" PgUp / PgDn ", Theme::md_code()),
-            Span::styled(" – Scroll transcript ", Theme::agent_text()),
+            Span::styled("PgUp / PgDn", Theme::key_hint()),
+            Span::styled("  Scroll transcript", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" Ctrl-U / Ctrl-D ", Theme::md_code()),
-            Span::styled(" – Scroll up/down 10 lines ", Theme::agent_text()),
+            Span::styled("Ctrl-U / Ctrl-D", Theme::key_hint()),
+            Span::styled("  Scroll up/down 10 lines", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" Ctrl-S ", Theme::md_code()),
-            Span::styled(" – Open session picker ", Theme::agent_text()),
+            Span::styled("Ctrl-S", Theme::key_hint()),
+            Span::styled("  Open session picker", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" ? ", Theme::md_code()),
-            Span::styled(" – Show this help ", Theme::agent_text()),
+            Span::styled("?", Theme::key_hint()),
+            Span::styled("  Show this help", Theme::muted()),
         ]),
         Line::from(""),
-        Line::from(Span::styled(" Commands ", Theme::title())),
+        Line::from(Span::styled("COMMANDS", Theme::section_title())),
         Line::from(""),
         Line::from(vec![
-            Span::styled(" /help ", Theme::md_code()),
-            Span::styled(" – Show this help ", Theme::agent_text()),
+            Span::styled("/help", Theme::command_hint()),
+            Span::styled("  Show this help", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" /clear ", Theme::md_code()),
-            Span::styled(" – Clear transcript ", Theme::agent_text()),
+            Span::styled("/clear", Theme::command_hint()),
+            Span::styled("  Clear transcript", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" /sessions ", Theme::md_code()),
-            Span::styled(" – Open session picker ", Theme::agent_text()),
+            Span::styled("/sessions", Theme::command_hint()),
+            Span::styled("  Open session picker", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" /export <file> ", Theme::md_code()),
-            Span::styled(" – Export transcript as markdown ", Theme::agent_text()),
+            Span::styled("/export <file>", Theme::command_hint()),
+            Span::styled("  Export transcript as markdown", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" /model <id> ", Theme::md_code()),
-            Span::styled(" – Set model ", Theme::agent_text()),
+            Span::styled("/model <id>", Theme::command_hint()),
+            Span::styled("  Set model", Theme::muted()),
         ]),
         Line::from(vec![
-            Span::styled(" /temp <0.0-2.0> ", Theme::md_code()),
-            Span::styled(" – Set temperature (overrides engine) ", Theme::agent_text()),
+            Span::styled("/temp <0.0-2.0>", Theme::command_hint()),
+            Span::styled("  Set temperature (overrides engine)", Theme::muted()),
         ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            " Press Esc to close ",
-            Theme::picker_dim(),
-        )),
     ];
 
-    let para = Paragraph::new(help_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Theme::border())
-                .title(Span::styled(" Help — Esc to close ", Theme::title())),
-        )
-        .style(Style::default().bg(Color::Black));
-    
+    let modal = modal_block("Help");
+    let inner = modal.inner(popup);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
     f.render_widget(Clear, popup);
-    f.render_widget(para, popup);
+    f.render_widget(modal, popup);
+    f.render_widget(
+        Paragraph::new(help_text).style(Theme::modal_surface()),
+        sections[0],
+    );
+    f.render_widget(
+        Paragraph::new("Esc close")
+            .style(Theme::hint())
+            .alignment(Alignment::Right),
+        sections[1],
+    );
 }
 
 /// Wrap one logical line to the transcript's inner width and push every
@@ -305,13 +327,13 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let view = view_h.max(1) as usize;
     // MAX_SCROLL also keeps `area.height + scroll.y` inside u16 (D007).
     let max_scroll = total.saturating_sub(view).min(MAX_SCROLL as usize);
-    
+
     // Clamp scroll to actual content height to prevent scrolling past bottom
     // This fixes the issue where scroll can accumulate beyond content height
     if !app.follow {
         app.scroll = (app.scroll as usize).min(max_scroll) as u16;
     }
-    
+
     let scroll = if app.follow {
         max_scroll
     } else {
@@ -319,6 +341,7 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     } as u16;
 
     let para = Paragraph::new(rows)
+        .style(Theme::panel())
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -363,11 +386,9 @@ fn draw_spinner(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn draw_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Theme::border())
-        .title(Span::styled(
-            " Input — Enter send, Shift+Enter newline ",
-            Theme::title(),
-        ));
+        .border_style(Theme::border_focus())
+        .style(Theme::panel())
+        .title(Span::styled(" Input ", Theme::title()));
     app.input.set_block(block);
     f.render_widget(&app.input, area);
 }
@@ -390,14 +411,11 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     // Header
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " Veritas Agent ",
-            Theme::sidebar_title(),
-        )))
-        .block(
+        Paragraph::new(Line::from(Span::styled(" Veritas Agent ", Theme::title()))).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Theme::border()),
+                .border_style(Theme::border())
+                .style(Theme::panel()),
         ),
         rows[0],
     );
@@ -422,10 +440,12 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ],
         [Constraint::Length(6), Constraint::Min(8)],
     )
+    .style(Theme::telemetry_value())
     .block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Theme::border())
+            .style(Theme::panel())
             .title(Span::styled(" Model ", Theme::title())),
     );
     f.render_widget(table, rows[1]);
@@ -443,8 +463,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
     f.render_widget(
         Gauge::default()
-            .block(Block::default().title(vram_title).borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Theme::gauge_vram()))
+            .block(
+                Block::default()
+                    .title(vram_title)
+                    .borders(Borders::ALL)
+                    .border_style(Theme::border())
+                    .style(Theme::panel()),
+            )
+            .gauge_style(Theme::gauge_vram())
             .ratio(vram_ratio.clamp(0.0, 1.0)),
         rows[3],
     );
@@ -457,8 +483,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
     f.render_widget(
         Gauge::default()
-            .block(Block::default().title(" RAM ").borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Theme::gauge_ram()))
+            .block(
+                Block::default()
+                    .title(" RAM ")
+                    .borders(Borders::ALL)
+                    .border_style(Theme::border())
+                    .style(Theme::panel()),
+            )
+            .gauge_style(Theme::gauge_ram())
             .ratio(ram_ratio.clamp(0.0, 1.0)),
         rows[4],
     );
@@ -470,7 +502,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         " GPU % n/a "
     };
     let spark = Sparkline::default()
-        .block(Block::default().title(gpu_title).borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(gpu_title)
+                .borders(Borders::ALL)
+                .border_style(Theme::border())
+                .style(Theme::panel()),
+        )
+        .style(Theme::gauge_gpu())
         .data(&app.stats.gpu_history)
         .max(100);
     f.render_widget(spark, rows[5]);
@@ -482,13 +521,23 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         _ => 0.0,
     };
     let ctx_title = match app.ctx_window {
-        Some(max) => format!(" CTX {}/{} ", app.stats.ctx_used, max),
-        None => format!(" CTX {} tok · n/a ", app.stats.ctx_used),
+        Some(max) => Line::from(format!(" CTX {}/{} ", app.stats.ctx_used, max)),
+        None => Line::from(vec![
+            Span::raw(format!(" CTX {} tok · ", app.stats.ctx_used)),
+            Span::styled("n/a", Theme::telemetry_unavailable()),
+            Span::raw(" "),
+        ]),
     };
     f.render_widget(
         Gauge::default()
-            .block(Block::default().title(ctx_title).borders(Borders::ALL))
-            .gauge_style(Style::default().fg(Theme::gauge_ctx(ctx_ratio)))
+            .block(
+                Block::default()
+                    .title(ctx_title)
+                    .borders(Borders::ALL)
+                    .border_style(Theme::border())
+                    .style(Theme::panel()),
+            )
+            .gauge_style(Theme::gauge_ctx(ctx_ratio))
             .ratio(ctx_ratio),
         rows[6],
     );
@@ -508,8 +557,8 @@ fn short_base(base: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::KeyCode;
     use crate::app::{ChatMessage, Config};
+    use crossterm::event::KeyCode;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -618,13 +667,50 @@ mod tests {
         // 60x30: popup covers rows 6..24, cols 12..48 — the sidebar gauges
         // (VRAM/RAM/CTX titles at x≈29) must be punched out by Clear.
         let text = render(&mut app, 60, 30);
-        assert!(text.contains("Sessions —"), "picker title visible:\n{text}");
+        assert!(text.contains("Sessions"), "picker title visible:\n{text}");
         assert!(text.contains("First chat"), "entries listed:\n{text}");
         assert!(text.contains("Second chat"), "entries listed:\n{text}");
         assert!(text.contains("9 msgs"), "metadata shown:\n{text}");
         assert!(
             !text.contains("VRAM"),
             "overlay must hide widgets behind it:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn help_renders_modal_hierarchy_and_footer() {
+        let mut app = test_app();
+        app.help_open = true;
+        let text = render(&mut app, 60, 30);
+        assert!(
+            text.contains("Help"),
+            "help title visible:
+{text}"
+        );
+        assert!(
+            text.contains("KEYBOARD"),
+            "keyboard section visible:
+{text}"
+        );
+        assert!(
+            text.contains("COMMANDS"),
+            "commands section visible:
+{text}"
+        );
+        assert!(
+            text.contains("/temp <0.0-2.0>"),
+            "last command visible:
+{text}"
+        );
+        assert!(
+            text.contains("Esc close"),
+            "modal footer visible:
+{text}"
+        );
+        assert!(
+            !text.contains("VRAM"),
+            "overlay must hide widgets behind it:
+{text}"
         );
     }
 

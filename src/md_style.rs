@@ -75,12 +75,12 @@ impl StyleSheet for VeritasMd {
 
     // HTML styling (if any HTML content appears)
     fn html(&self) -> Style {
-        Theme::picker_dim() // Dim HTML content
+        Theme::faint() // Dim HTML content
     }
 
     // Image alt text styling
     fn image_alt(&self) -> Style {
-        Theme::picker_dim() // Dim image alt text
+        Theme::faint() // Dim image alt text
     }
 }
 

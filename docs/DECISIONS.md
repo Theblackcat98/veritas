@@ -299,3 +299,11 @@ Rules:
 - **Context:** The session picker and help overlay established a centered, keyboard-first modal pattern, but the broader application lacked a shared visual language. The style needed to support Veritas as a truthful, local-first telemetry console without introducing decorative complexity.
 - **Decision:** Define the Veritas visual identity as Quiet Mission Control: a dark, sparse terminal instrument panel with restrained cyan/teal structure, sky-blue user identity, mint agent identity, amber activity, explicit warning/error states, muted metadata, and shared semantic theme roles. Document reusable surface, chrome, text, interaction, conversation, state, telemetry, markdown, and modal tokens in `docs/STYLE.md`. Provide a dependency-free visual reference in `docs/style-preview.html`.
 - **Consequences:** Future UI styling should consume semantic tokens from `src/theme.rs` rather than raw colors or widget-specific styles. Sessions and help should share one modal language while keeping content-specific layouts. The browser preview is a design aid only; it adds no runtime dependency or behavior. Runtime theme refactoring remains a follow-up implementation task.
+
+
+## D022 — Shared semantic modal styling supersedes picker-specific styling
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** D020 made the session picker visually match the help overlay by reusing markdown heading/code styles and a repeated bullet marker. The Quiet Mission Control direction requires modal controls, session metadata, and markdown content to have separate semantic roles.
+- **Decision:** Supersede D020 with a shared modal frame using `modal_surface`, `border_focus`, `title`, `section_title`, `key_hint`, `command_hint`, `muted`, `faint`, and `selected_row` roles. Session rows use a single `›` selection marker, readable titles, subdued metadata, and a dedicated footer; help uses distinct keyboard and command sections. Markdown uses the shared `faint` role for dim content instead of a picker-specific alias.
+- **Consequences:** Modal styling is consistent without coupling application chrome to markdown presentation. D020 remains immutable history but no longer describes the current session-picker implementation. No new dependencies or widgets are required.
