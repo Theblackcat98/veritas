@@ -57,6 +57,21 @@ pub fn new_id() -> String {
     format!("sess-{}", now_unix())
 }
 
+/// Ensure a session ID does not collide with an existing session file in `dir`.
+pub fn unique_id(dir: &Path, base_id: &str) -> String {
+    if !dir.join(format!("{base_id}.json")).exists() {
+        return base_id.to_string();
+    }
+    let mut counter = 1;
+    loop {
+        let candidate = format!("{base_id}-{counter}");
+        if !dir.join(format!("{candidate}.json")).exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
 fn to_stored(messages: &[ChatMessage]) -> Vec<StoredMessage> {
     messages
         .iter()
@@ -154,9 +169,12 @@ pub fn load(dir: &Path, id: &str) -> io::Result<(Option<String>, u64, Vec<ChatMe
 }
 
 /// First user message → whitespace-collapsed, ≤40 chars total (ellipsis
-/// included when truncated), char-boundary safe.
+/// included when truncated), char-boundary safe. Returns "Untitled" if empty.
 pub fn auto_title(s: &str) -> String {
     let collapsed = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return "Untitled".to_string();
+    }
     if collapsed.chars().count() <= 40 {
         return collapsed;
     }
@@ -179,7 +197,11 @@ pub fn rel_time(ts: u64, now: u64) -> String {
 /// Transcript as markdown: H1 title, then `## You` / `## Agent` sections
 /// with verbatim content (D014).
 pub fn export_markdown(title: Option<&str>, messages: &[ChatMessage]) -> String {
-    let mut out = format!("# {}\n\n", title.unwrap_or("Veritas session"));
+    let title_str = title
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .unwrap_or("Veritas session");
+    let mut out = format!("# {title_str}\n\n");
     for m in messages {
         let role = match m.role {
             Role::User => "You",
@@ -265,5 +287,29 @@ mod tests {
         assert!(md.contains("## You\n\nhi\n\n"));
         assert!(md.contains("## Agent\n\nhello\n\n"));
         assert!(export_markdown(None, &messages).starts_with("# Veritas session"));
+        assert!(export_markdown(Some("   "), &messages).starts_with("# Veritas session"));
+    }
+
+    #[test]
+    fn auto_title_empty_defaults_to_untitled() {
+        assert_eq!(auto_title(""), "Untitled");
+        assert_eq!(auto_title("   \n\t  "), "Untitled");
+    }
+
+    #[test]
+    fn unique_id_disambiguates_existing_files() {
+        let dir = tmp_dir("unique_id");
+        fs::create_dir_all(&dir).expect("create dir");
+        let id1 = unique_id(&dir, "sess-100");
+        assert_eq!(id1, "sess-100");
+        fs::write(dir.join("sess-100.json"), b"{}").expect("write");
+
+        let id2 = unique_id(&dir, "sess-100");
+        assert_eq!(id2, "sess-100-1");
+        fs::write(dir.join("sess-100-1.json"), b"{}").expect("write");
+
+        let id3 = unique_id(&dir, "sess-100");
+        assert_eq!(id3, "sess-100-2");
+        fs::remove_dir_all(&dir).ok();
     }
 }

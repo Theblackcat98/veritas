@@ -178,8 +178,10 @@ impl<'a> App<'a> {
         if self.session_created == 0 {
             self.session_created = session::now_unix();
         }
+        let dir = session::sessions_dir();
         if self.session_id.is_none() {
-            self.session_id = Some(session::new_id());
+            let base = session::new_id();
+            self.session_id = Some(session::unique_id(&dir, &base));
         }
         let title = match self.session_title.clone() {
             Some(t) => t,
@@ -189,7 +191,6 @@ impl<'a> App<'a> {
                 t
             }
         };
-        let dir = session::sessions_dir();
         let id = self.session_id.as_deref().expect("just set").to_string();
         let created = self.session_created;
         match session::save(&dir, &id, Some(&title), created, &self.messages) {
@@ -321,6 +322,8 @@ impl<'a> App<'a> {
             Some("clear") => {
                 self.messages.clear();
                 self.stats.ctx_used = 0;
+                self.scroll = 0;
+                self.follow = true;
                 // Fresh identity: the next save must not overwrite the file
                 // that held the cleared conversation (D012).
                 self.session_id = None;
@@ -572,9 +575,8 @@ where
                         continue;
                     }
                     KeyCode::PageDown => {
-                        app.follow = false;
                         app.scroll = app.scroll.saturating_add(10).min(MAX_SCROLL);
-                        // Clamp will happen in render based on actual content height
+                        // Clamp and follow re-engagement happen in render based on actual content height
                         continue;
                     }
                     KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {

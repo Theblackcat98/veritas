@@ -18,7 +18,23 @@ use ratatui::Terminal;
 
 use app::Config;
 
+fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        io::stdout(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    );
+}
+
 fn main() -> io::Result<()> {
+    for arg in std::env::args().skip(1) {
+        if arg == "--version" || arg == "-V" {
+            println!("veritas-agent {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+    }
+
     // Tokio runtime for the OpenAI-compatible SSE client. The TUI loop itself
     // stays synchronous; async work is spawned onto this runtime.
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -29,6 +45,12 @@ fn main() -> io::Result<()> {
 
     let config = Config::from_env();
 
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        default_panic(info);
+    }));
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -37,12 +59,7 @@ fn main() -> io::Result<()> {
 
     let res = app::run(&mut terminal, config);
 
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    restore_terminal();
     terminal.show_cursor()?;
 
     res

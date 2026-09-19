@@ -336,3 +336,20 @@ Rules:
 - **Consequences:** Question marks work consistently in chat across terminal
   emulators. Help has one unambiguous keyboard-first entry point, `/help`;
   D023's conditional shortcut is no longer part of the current behavior.
+
+## D025 — Standard 80×24 terminal geometry, stream options, llama.cpp probing, and terminal panic safety
+- **Date:** 2026-09-19
+- **Status:** accepted
+- **Context:** (1) The sidebar model table allocated 9 rows for 4 rows of text, squishing or clipping the CTX gauge on standard 80×24 terminals; the help overlay clipped on 24-row terminals and had unaligned columns. (2) Standard OpenAI-compatible endpoints (and llama.cpp server) require `"stream_options": {"include_usage": true}` to return usage chunks in SSE streams; llama.cpp server context length is served at `/props` instead of Ollama's `/api/show`. (3) In-flight streaming truncated at 2000 chars with per-frame string allocations. (4) Panics left terminals in raw mode and alternate screen without cleanup. (5) Same-second session creation caused file collisions.
+- **Decision:**
+  - Resize model table vertical constraint from `Length(9)` to `Length(6)` so all sidebar widgets fit in 24 rows.
+  - Scale help overlay to fit 24 rows and align key badges and command hints into consistent columns per `docs/STYLE.md`.
+  - Install a panic hook with `std::panic::set_hook` that restores normal terminal state on panic.
+  - Add `stream_options: {"include_usage": true}` in `ChatRequest`.
+  - Add fallback probing to llama.cpp server's `GET /props` in `fetch_context_length` with a 3s timeout.
+  - Remove 2000-char truncation during streaming; wrap and render in-flight text directly.
+  - Re-engage follow mode when manual scrolling down reaches `max_scroll`.
+  - Add `unique_id` to prevent same-second session filename collisions.
+  - Add `--version` / `-V` CLI flag.
+- **Consequences:** All widgets render cleanly on standard 80×24 terminals. Both Ollama and llama.cpp report real context window totals and live token usage. Unexpected panics do not break user terminals. No new dependencies added.
+

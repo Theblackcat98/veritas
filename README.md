@@ -43,10 +43,10 @@ probed from the engine (D009).
   every 500 ms; widgets are hidden on anything else. Never faked.
 - **CTX** — used tokens come from the server's `usage` in stream chunks when
   it sends them; otherwise a chars/4 estimate is shown. The window total is
-  probed from the engine at startup and on `/model` (Ollama `/api/show`);
-  on engines without model-info endpoints the window shows `n/a` and no
-  ratio gauge. The gauge shifts green → yellow (≥70%) → red (≥90%) as it
-  fills.
+  probed from the engine at startup and on `/model` (Ollama `/api/show` or
+  llama.cpp server `/props`); on engines without model-info endpoints the
+  window shows `n/a` and no ratio gauge. The gauge shifts green → yellow (≥70%)
+  → red (≥90%) as it fills.
 
 ## Commands
 

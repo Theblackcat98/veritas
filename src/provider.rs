@@ -21,10 +21,17 @@ pub struct WireMessage {
 }
 
 #[derive(Debug, Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct ChatRequest {
     model: String,
     messages: Vec<WireMessage>,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
     /// Omitted entirely unless the user overrides via /temp — the engine's
     /// own temperature then applies (D009).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,10 +79,18 @@ pub async fn stream_chat(
         model,
         messages: history,
         stream: true,
+        stream_options: Some(StreamOptions {
+            include_usage: true,
+        }),
         temperature,
     };
 
-    let mut req_builder = Client::new().post(&url).json(&req);
+    let client = Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| Client::new());
+
+    let mut req_builder = client.post(&url).json(&req);
     if !api_key.is_empty() {
         req_builder = req_builder.bearer_auth(api_key);
     }
@@ -152,24 +167,61 @@ pub async fn stream_chat(
 }
 
 /// Best-effort probe of the model's context window from the inference
-/// engine (D009). Ollama-only today — the charter's default local target:
-/// `POST {root}/api/show` on the base URL with `/v1` stripped. Returns None
-/// on any other engine or any error; the sidebar then shows `n/a`.
+/// engine (D009). Probes Ollama (`POST {root}/api/show`) with fallback to
+/// llama.cpp server (`GET {root}/props`). Returns None on any other engine or
+/// any error; the sidebar then shows `n/a`.
 pub async fn fetch_context_length(base: String, model: String) -> Option<u64> {
     let trimmed = base.trim_end_matches('/');
     let root = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
-    let url = format!("{root}/api/show");
-    let resp = Client::new()
-        .post(&url)
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or_else(|_| Client::new());
+
+    // 1. Try Ollama: POST {root}/api/show
+    let ollama_url = format!("{root}/api/show");
+    if let Ok(resp) = client
+        .post(&ollama_url)
         .json(&serde_json::json!({ "model": model }))
         .send()
         .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
+    {
+        if resp.status().is_success() {
+            if let Ok(v) = resp.json::<serde_json::Value>().await {
+                if let Some(ctx) = parse_context_length(&v) {
+                    return Some(ctx);
+                }
+            }
+        }
     }
-    let v: serde_json::Value = resp.json().await.ok()?;
-    parse_context_length(&v)
+
+    // 2. Try llama.cpp server: GET {root}/props
+    let props_url = format!("{root}/props");
+    if let Ok(resp) = client.get(&props_url).send().await {
+        if resp.status().is_success() {
+            if let Ok(v) = resp.json::<serde_json::Value>().await {
+                if let Some(ctx) = parse_llama_cpp_props(&v) {
+                    return Some(ctx);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_llama_cpp_props(v: &serde_json::Value) -> Option<u64> {
+    if let Some(n) = v
+        .get("default_generation_settings")
+        .and_then(|s| s.get("n_ctx"))
+        .and_then(|x| x.as_u64())
+    {
+        return Some(n);
+    }
+    if let Some(n) = v.get("n_ctx").and_then(|x| x.as_u64()) {
+        return Some(n);
+    }
+    None
 }
 
 fn parse_context_length(v: &serde_json::Value) -> Option<u64> {
@@ -225,6 +277,7 @@ mod tests {
             model: "m".to_string(),
             messages: vec![],
             stream: true,
+            stream_options: None,
             temperature: None,
         };
         let v = serde_json::to_value(&req).expect("serializes");
@@ -237,6 +290,7 @@ mod tests {
             model: "m".to_string(),
             messages: vec![],
             stream: true,
+            stream_options: None,
             temperature: Some(0.5),
         };
         let v = serde_json::to_value(&req).expect("serializes");
@@ -267,5 +321,39 @@ mod tests {
     fn context_length_absent_is_none() {
         let v = serde_json::json!({ "model_info": {} });
         assert_eq!(parse_context_length(&v), None);
+    }
+
+    #[test]
+    fn stream_options_included_in_chat_request() {
+        let req = ChatRequest {
+            model: "m".to_string(),
+            messages: vec![],
+            stream: true,
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
+            temperature: None,
+        };
+        let v = serde_json::to_value(&req).expect("serializes");
+        assert_eq!(
+            v.get("stream_options"),
+            Some(&serde_json::json!({ "include_usage": true }))
+        );
+    }
+
+    #[test]
+    fn parse_llama_cpp_props_extracts_n_ctx() {
+        let v = serde_json::json!({
+            "default_generation_settings": {
+                "n_ctx": 4096
+            }
+        });
+        assert_eq!(parse_llama_cpp_props(&v), Some(4096));
+
+        let v2 = serde_json::json!({ "n_ctx": 8192 });
+        assert_eq!(parse_llama_cpp_props(&v2), Some(8192));
+
+        let v3 = serde_json::json!({});
+        assert_eq!(parse_llama_cpp_props(&v3), None);
     }
 }

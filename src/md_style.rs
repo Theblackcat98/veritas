@@ -131,33 +131,32 @@ pub fn render_wrapped(markdown: &str, width: usize) -> Vec<Line<'static>> {
         tui_markdown::from_str_with_options(markdown, &tui_markdown::Options::new(VeritasMd));
     let mut out = Vec::new();
     for line in &text.lines {
-        let final_line = style_line(line);
+        let final_line = style_line(line, width);
         wrap_line(&final_line, width, &mut out);
     }
     out
 }
 
 /// Process a single line: enhance bold/italic and handle horizontal rules
-fn style_line(line: &Line<'_>) -> Line<'static> {
+fn style_line(line: &Line<'_>, width: usize) -> Line<'static> {
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-    
+
     // Check if this line looks like a horizontal rule
-    let is_hr = text.trim().chars().all(|c| c == '-' || c == '_' || c == '*') && 
-                text.trim().len() >= 3;
-    
+    let is_hr = text.trim().chars().all(|c| c == '-' || c == '_' || c == '*')
+        && text.trim().len() >= 3;
+
     // Check if this line is a code block fence
     let is_fence = text.trim().starts_with("```");
-    
+
     if is_hr {
-        Line::from(Span::styled("─".repeat(text.trim().len().min(50)), Theme::md_hr()))
+        let hr_len = 40.min(width).max(8);
+        Line::from(Span::styled("─".repeat(hr_len), Theme::md_hr()))
     } else if is_fence {
         Line::from(Span::styled(text, Theme::md_code()))
     } else {
         enhance_bold_italic(line)
     }
 }
-
-
 
 /// Enhance bold and italic spans with colors from the theme.
 /// tui-markdown handles the modifiers but we add colors for better visibility.
@@ -168,11 +167,11 @@ fn enhance_bold_italic(line: &Line<'_>) -> Line<'static> {
         .map(|span| {
             let style = span.style;
             let content: String = span.content.to_string();
-            
+
             // Add colors to bold and italic text
             let is_bold = style.add_modifier.contains(Modifier::BOLD);
             let is_italic = style.add_modifier.contains(Modifier::ITALIC);
-            
+
             let enhanced_style = if is_bold {
                 Theme::md_bold()
             } else if is_italic {
@@ -180,10 +179,71 @@ fn enhance_bold_italic(line: &Line<'_>) -> Line<'static> {
             } else {
                 style
             };
-            
+
             Span::styled(content, enhanced_style)
         })
         .collect();
-    
+
     Line::from(enhanced_spans)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_wrapped_handles_headings() {
+        let md = "# Title 1\n## Subtitle 2\nBody text";
+        let lines = render_wrapped(md, 50);
+        assert!(!lines.is_empty());
+        let full_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(full_text.contains("Title 1"));
+        assert!(full_text.contains("Subtitle 2"));
+        assert!(full_text.contains("Body text"));
+    }
+
+    #[test]
+    fn render_wrapped_horizontal_rule_scales_properly() {
+        let md = "Above\n\n---\n\nBelow";
+        let lines = render_wrapped(md, 50);
+        let hr_lines: Vec<_> = lines
+            .iter()
+            .filter(|l| {
+                let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
+                s.starts_with('─')
+            })
+            .collect();
+        assert_eq!(hr_lines.len(), 1, "must render one horizontal rule");
+        let hr_str: String = hr_lines[0]
+            .spans
+            .iter()
+            .map(|sp| sp.content.as_ref())
+            .collect();
+        assert_eq!(hr_str.chars().count(), 40, "HR must be 40 chars wide in 50-col view");
+    }
+
+    #[test]
+    fn render_wrapped_respects_narrow_column_width() {
+        let long_line = "word ".repeat(30);
+        let lines = render_wrapped(&long_line, 20);
+        assert!(lines.len() > 1);
+        for l in &lines {
+            let width: usize = l.spans.iter().map(|s| s.width()).sum();
+            assert!(width <= 20, "line width {width} must not exceed 20");
+        }
+    }
+
+    #[test]
+    fn render_wrapped_code_block_fences() {
+        let md = "```rust\nlet x = 42;\n```";
+        let lines = render_wrapped(md, 50);
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(text.contains("let x = 42;"));
+    }
 }

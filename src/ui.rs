@@ -144,15 +144,34 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
+fn key_row(key: &str, desc: &str) -> Line<'static> {
+    let pad = 16usize.saturating_sub(key.len()).max(2);
+    Line::from(vec![
+        Span::styled(key.to_string(), Theme::key_hint()),
+        Span::styled(" ".repeat(pad), Theme::muted()),
+        Span::styled(desc.to_string(), Theme::muted()),
+    ])
+}
+
+fn cmd_row(cmd: &str, desc: &str) -> Line<'static> {
+    let pad = 16usize.saturating_sub(cmd.len()).max(2);
+    Line::from(vec![
+        Span::styled(cmd.to_string(), Theme::command_hint()),
+        Span::styled(" ".repeat(pad), Theme::muted()),
+        Span::styled(desc.to_string(), Theme::muted()),
+    ])
+}
+
 /// Centered help overlay showing all keybindings (like the session picker).
 fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
-    // 70% width, 70% height, centered.
+    let popup_h = 20.min(area.height);
+    let top_pad = area.height.saturating_sub(popup_h) / 2;
     let vert = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(10),
-            Constraint::Percentage(80),
-            Constraint::Percentage(10),
+            Constraint::Length(top_pad),
+            Constraint::Length(popup_h),
+            Constraint::Min(0),
         ])
         .split(area);
     let horiz = Layout::default()
@@ -167,62 +186,21 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
     let popup = horiz[1];
     let help_text = vec![
         Line::from(Span::styled("KEYBOARD", Theme::section_title())),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Enter", Theme::key_hint()),
-            Span::styled("  Send message", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("Shift+Enter", Theme::key_hint()),
-            Span::styled("  Newline in input", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("Esc", Theme::key_hint()),
-            Span::styled("  Cancel stream / close overlay", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("Ctrl-C / Ctrl-Q", Theme::key_hint()),
-            Span::styled("  Quit", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("PgUp / PgDn", Theme::key_hint()),
-            Span::styled("  Scroll transcript", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("Ctrl-U / Ctrl-D", Theme::key_hint()),
-            Span::styled("  Scroll up/down 10 lines", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("Ctrl-S", Theme::key_hint()),
-            Span::styled("  Open session picker", Theme::muted()),
-        ]),
+        key_row("Enter", "Send message"),
+        key_row("Shift+Enter", "Newline in input"),
+        key_row("Esc", "Cancel stream / close overlay"),
+        key_row("Ctrl-C / Ctrl-Q", "Quit"),
+        key_row("PgUp / PgDn", "Scroll transcript"),
+        key_row("Ctrl-U / Ctrl-D", "Scroll up/down 10 lines"),
+        key_row("Ctrl-S", "Open session picker"),
         Line::from(""),
         Line::from(Span::styled("COMMANDS", Theme::section_title())),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("/help", Theme::command_hint()),
-            Span::styled("  Show this help", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("/clear", Theme::command_hint()),
-            Span::styled("  Clear transcript", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("/sessions", Theme::command_hint()),
-            Span::styled("  Open session picker", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("/export <file>", Theme::command_hint()),
-            Span::styled("  Export transcript as markdown", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("/model <id>", Theme::command_hint()),
-            Span::styled("  Set model", Theme::muted()),
-        ]),
-        Line::from(vec![
-            Span::styled("/temp <0.0-2.0>", Theme::command_hint()),
-            Span::styled("  Set temperature (overrides engine)", Theme::muted()),
-        ]),
+        cmd_row("/help", "Show this help"),
+        cmd_row("/clear", "Clear transcript"),
+        cmd_row("/sessions", "Open session picker"),
+        cmd_row("/export <file>", "Export transcript as markdown"),
+        cmd_row("/model <id>", "Set model"),
+        cmd_row("/temp <0.0-2.0>", "Set temperature (overrides engine)"),
     ];
 
     let modal = modal_block("Help");
@@ -298,17 +276,7 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         if app.pending.is_empty() {
             rows.push(Line::from(Span::styled("…", Theme::status())));
         } else {
-            // Show last ~2000 chars of the in-flight response to keep render cheap.
-            let tail: String = app
-                .pending
-                .chars()
-                .rev()
-                .take(2000)
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
-            for chunk in tail.split('\n') {
+            for chunk in app.pending.split('\n') {
                 push_wrapped(&mut rows, text_width, chunk, Theme::agent_text());
             }
             rows.push(Line::from(Span::styled("▊", Theme::spinner())));
@@ -324,10 +292,14 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     // MAX_SCROLL also keeps `area.height + scroll.y` inside u16 (D007).
     let max_scroll = total.saturating_sub(view).min(MAX_SCROLL as usize);
 
-    // Clamp scroll to actual content height to prevent scrolling past bottom
-    // This fixes the issue where scroll can accumulate beyond content height
+    // Clamp scroll to actual content height to prevent scrolling past bottom.
+    // When manual scrolling down reaches or passes the tail, re-engage follow mode.
     if !app.follow {
-        app.scroll = (app.scroll as usize).min(max_scroll) as u16;
+        if (app.scroll as usize) >= max_scroll {
+            app.follow = true;
+        } else {
+            app.scroll = (app.scroll as usize).min(max_scroll) as u16;
+        }
     }
 
     let scroll = if app.follow {
@@ -400,8 +372,8 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // header
-            Constraint::Length(9), // model table
-            Constraint::Min(1),    // filler
+            Constraint::Length(6), // model table (4 rows + 2 borders = 6)
+            Constraint::Min(0),    // filler
             Constraint::Length(3), // VRAM
             Constraint::Length(3), // RAM
             Constraint::Length(6), // GPU sparkline
@@ -772,5 +744,26 @@ mod tests {
         );
         app.handle_picker_key(KeyCode::Esc);
         assert!(app.picker.is_none(), "Esc closes the picker");
+    }
+
+    #[tokio::test]
+    async fn standard_80x24_layout_renders_all_widgets_and_help() {
+        let mut app = test_app();
+        // Set mock context window so CTX ratio title is tested
+        app.ctx_window = Some(8192);
+        app.stats.ctx_used = 1024;
+        let text = render(&mut app, 80, 24);
+        assert!(text.contains("Veritas Agent"), "header visible in 80x24:\n{text}");
+        assert!(text.contains("Model"), "model table visible in 80x24:\n{text}");
+        assert!(text.contains("RAM"), "RAM gauge visible in 80x24:\n{text}");
+        assert!(text.contains("CTX"), "CTX gauge visible in 80x24:\n{text}");
+
+        // Now test help overlay in 80x24
+        app.help_open = true;
+        let help_view = render(&mut app, 80, 24);
+        assert!(help_view.contains("KEYBOARD"), "keyboard section visible in 80x24:\n{help_view}");
+        assert!(help_view.contains("COMMANDS"), "commands section visible in 80x24:\n{help_view}");
+        assert!(help_view.contains("/temp <0.0-2.0>"), "last command visible in 80x24:\n{help_view}");
+        assert!(help_view.contains("Esc close"), "footer visible in 80x24:\n{help_view}");
     }
 }

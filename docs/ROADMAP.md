@@ -52,9 +52,9 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 ## Phase 4 — Polish & release 🧭
 
 - Theme presets selectable via env var (still one theme file)
-- `?` help overlay listing keybindings
+- Help overlay modal listing keybindings via `/help` ✅ (D018/D022; `?` shortcut rejected per D024)
 - CI: build + clippy
-- `--version` flag, README screenshots
+- `--version` flag ✅ (D025), README screenshots
 
 ## Explicitly rejected 🚫
 
@@ -76,7 +76,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 | Sparkline (ratatui)          | GPU % history               | ✅ real (P1)                  |
 | Table (ratatui)              | Model params                | ✅ real params (P1)           |
 | Scrollbar (ratatui)          | Transcript position         | ✅                            |
-| Clear widget (ratatui)       | Overlay backgrounds         | ✅ real (P2 picker)           |
+| Clear widget (ratatui)       | Overlay backgrounds         | ✅ real (P2 picker, help)     |
 
 New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 
@@ -88,7 +88,7 @@ New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 | Esc                          | Cancel stream              | ✅     |
 | Ctrl-C / Ctrl-Q              | Quit                       | ✅     |
 | PgUp/PgDn, Ctrl-U/D, wheel   | Scroll                     | ✅     |
-| `/help`                      | Command list in status bar | ✅     |
-| `?`                          | Help overlay               | 🔜     |
+| `/help`                      | Help overlay modal         | ✅     |
 | `/model`, `/temp`            | Set params                 | ✅     |
 | Ctrl-S                       | Sessions picker (save+list)| ✅ P2  |
+
