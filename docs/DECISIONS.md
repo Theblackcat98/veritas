@@ -307,3 +307,32 @@ Rules:
 - **Context:** D020 made the session picker visually match the help overlay by reusing markdown heading/code styles and a repeated bullet marker. The Quiet Mission Control direction requires modal controls, session metadata, and markdown content to have separate semantic roles.
 - **Decision:** Supersede D020 with a shared modal frame using `modal_surface`, `border_focus`, `title`, `section_title`, `key_hint`, `command_hint`, `muted`, `faint`, and `selected_row` roles. Session rows use a single `›` selection marker, readable titles, subdued metadata, and a dedicated footer; help uses distinct keyboard and command sections. Markdown uses the shared `faint` role for dim content instead of a picker-specific alias.
 - **Consequences:** Modal styling is consistent without coupling application chrome to markdown presentation. D020 remains immutable history but no longer describes the current session-picker implementation. No new dependencies or widgets are required.
+
+## D023 — Preserve literal shifted question marks and anchor manual scroll
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** Loading a long session displayed the follow tail, but the first
+  wheel-up event used a stale zero scroll offset and jumped to the top. Also,
+  the global `?` shortcut intercepted the shifted `/` users use to type a
+  literal question mark in chat.
+- **Decision:** While follow mode is rendered, keep the stored scroll offset
+  synchronized to the calculated tail position so the first manual scroll
+  starts at the visible bottom. Trigger the help shortcut only for an
+  unmodified `?`; shifted punctuation is passed to the input textarea.
+- **Consequences:** Manual scrolling has a continuous first step after loading
+  or following a response. Help remains available through `/help` and through
+  terminals that emit an unmodified `?` shortcut event; literal shifted `?`
+  input is no longer intercepted.
+
+## D024 — Literal question marks take precedence over the help command shortcut
+- **Date:** 2026-09-18
+- **Status:** accepted; supersedes D023
+- **Context:** Printable keyboard input does not reliably preserve whether a
+  `?` came from `Shift+/`; many terminals deliver both forms as the same
+  character event. A global `?` handler therefore intercepts legitimate chat
+  text.
+- **Decision:** Remove the global `?` key shortcut. Keep `/help` as the
+  explicit help-overlay command and pass `?` events to the textarea.
+- **Consequences:** Question marks work consistently in chat across terminal
+  emulators. Help has one unambiguous keyboard-first entry point, `/help`;
+  D023's conditional shortcut is no longer part of the current behavior.

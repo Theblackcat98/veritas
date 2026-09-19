@@ -81,6 +81,6 @@ cargo run --release
 
 - `Enter` — send · `Shift+Enter` — newline
 - `Esc` — stop streaming / close overlays · `Ctrl-S` — session picker · `Ctrl-C` / `Ctrl-Q` — quit
-- `?` — show help overlay
+- `/help` — show help overlay; `?` is entered as chat text
 - `PgUp`/`PgDn` or `Ctrl-U`/`Ctrl-D` or mouse wheel — scroll
 - In the picker: `↑`/`↓` select · `PgUp`/`PgDn` jump · `Enter` load · `Esc` cancel

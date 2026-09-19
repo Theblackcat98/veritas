@@ -560,11 +560,6 @@ where
                     app.open_picker();
                     continue;
                 }
-                // ?: show help overlay
-                if key.code == KeyCode::Char('?') {
-                    app.open_help();
-                    continue;
-                }
                 match key.code {
                     KeyCode::Esc if app.streaming => {
                         app.cancel_stream();

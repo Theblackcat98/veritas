@@ -196,10 +196,6 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
             Span::styled("Ctrl-S", Theme::key_hint()),
             Span::styled("  Open session picker", Theme::muted()),
         ]),
-        Line::from(vec![
-            Span::styled("?", Theme::key_hint()),
-            Span::styled("  Show this help", Theme::muted()),
-        ]),
         Line::from(""),
         Line::from(Span::styled("COMMANDS", Theme::section_title())),
         Line::from(""),
@@ -335,10 +331,14 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     }
 
     let scroll = if app.follow {
-        max_scroll
+        // Keep the stored offset in sync with the visible tail. This matters
+        // when the first manual action is wheel-up: it must move up from the
+        // current bottom, not subtract from a stale zero offset.
+        app.scroll = max_scroll as u16;
+        app.scroll
     } else {
-        app.scroll as usize
-    } as u16;
+        app.scroll
+    };
 
     let para = Paragraph::new(rows)
         .style(Theme::panel())
@@ -622,6 +622,26 @@ mod tests {
         assert!(
             text.contains("partial answer"),
             "streaming tail must stay visible:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn first_manual_scroll_starts_at_follow_tail() {
+        let mut app = test_app();
+        long_transcript(&mut app);
+        app.follow = true;
+        render(&mut app, 60, 20);
+        let tail = app.scroll;
+        assert!(tail > 3, "test transcript must have room to scroll");
+
+        app.follow = false;
+        app.scroll = app.scroll.saturating_sub(3);
+        let text = render(&mut app, 60, 20);
+
+        assert_eq!(app.scroll, tail - 3);
+        assert!(
+            !text.contains("message 01 "),
+            "one wheel tick must not jump to the top:\n{text}"
         );
     }
 
