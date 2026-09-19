@@ -291,3 +291,11 @@ Rules:
   background to block for consistency with help overlay.
 - **Consequences:** No new dependencies. Session picker now visually matches help overlay
   using existing theme tokens. Improved readability and UI consistency.
+
+
+## D021 — Quiet Mission Control visual identity
+- **Date:** 2026-09-18
+- **Status:** accepted
+- **Context:** The session picker and help overlay established a centered, keyboard-first modal pattern, but the broader application lacked a shared visual language. The style needed to support Veritas as a truthful, local-first telemetry console without introducing decorative complexity.
+- **Decision:** Define the Veritas visual identity as Quiet Mission Control: a dark, sparse terminal instrument panel with restrained cyan/teal structure, sky-blue user identity, mint agent identity, amber activity, explicit warning/error states, muted metadata, and shared semantic theme roles. Document reusable surface, chrome, text, interaction, conversation, state, telemetry, markdown, and modal tokens in `docs/STYLE.md`. Provide a dependency-free visual reference in `docs/style-preview.html`.
+- **Consequences:** Future UI styling should consume semantic tokens from `src/theme.rs` rather than raw colors or widget-specific styles. Sessions and help should share one modal language while keeping content-specific layouts. The browser preview is a design aid only; it adds no runtime dependency or behavior. Runtime theme refactoring remains a follow-up implementation task.

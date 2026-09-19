@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Veritas — Quiet Mission Control Style Preview</title>
+  <style>
+    :root {
+      --canvas: #080c10;
+      --panel: #0f171d;
+      --modal: #111d24;
+      --code-surface: #16212a;
+      --border: #33434e;
+      --border-focus: #22d3ee;
+      --primary: #22d3ee;
+      --teal: #2dd4bf;
+      --text: #e6edf3;
+      --muted: #94a3b8;
+      --faint: #64748b;
+      --user: #7dd3fc;
+      --agent: #a7f3d0;
+      --activity: #fbbf24;
+      --warning: #f59e0b;
+      --error: #f87171;
+      --success: #34d399;
+      --link: #7dd3fc;
+      --shadow: rgba(0, 0, 0, 0.34);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { color-scheme: dark; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    button, input { font: inherit; }
+
+    .page {
+      width: min(1440px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 48px 0 72px;
+    }
+
+    .eyebrow {
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      max-width: 880px;
+      margin-bottom: 12px;
+      color: var(--text);
+      font-size: clamp(30px, 5vw, 58px);
+      line-height: 1.05;
+      letter-spacing: -.06em;
+    }
+
+    h2 {
+      margin-bottom: 18px;
+      color: var(--primary);
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+      color: var(--teal);
+      font-size: 14px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .lede {
+      max-width: 760px;
+      margin-bottom: 26px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .notice {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 42px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .notice strong { color: var(--activity); }
+
+    .section {
+      margin-top: 42px;
+    }
+
+    .section-intro {
+      max-width: 760px;
+      margin-bottom: 18px;
+      color: var(--muted);
+    }
+
+    .card,
+    .terminal,
+    .role-card,
+    .modal-stage {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      box-shadow: 0 16px 38px var(--shadow);
+    }
+
+    .card { padding: 20px; }
+
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    .swatch {
+      min-height: 92px;
+      padding: 13px;
+      border: 1px solid var(--border);
+      background: var(--swatch);
+    }
+
+    .swatch.light-text { color: var(--canvas); }
+    .swatch-name { font-weight: 700; }
+    .swatch-value { margin-top: 5px; opacity: .75; font-size: 12px; }
+    .swatch-role { margin-top: 8px; opacity: .82; font-size: 11px; }
+
+    .token-groups {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 12px;
+    }
+
+    .token-group {
+      padding: 16px;
+      border: 1px solid var(--border);
+      background: var(--canvas);
+    }
+
+    .token-group h3 { margin-bottom: 12px; }
+
+    .token-list {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+    }
+
+    .token-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .token-row code { color: var(--text); }
+    .token-row span:last-child { color: var(--faint); text-align: right; }
+
+    .terminal { overflow: hidden; }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 48px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--canvas);
+    }
+
+    .brand {
+      color: var(--primary);
+      font-weight: 700;
+      letter-spacing: .06em;
+    }
+
+    .status-line {
+      color: var(--activity);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .app-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 1px;
+      background: var(--border);
+    }
+
+    .app-column,
+    .sidebar {
+      min-width: 0;
+      background: var(--panel);
+    }
+
+    .app-column { padding: 18px; }
+    .sidebar { padding: 12px; }
+
+    .block {
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .block-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 38px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .block-title small {
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 400;
+    }
+
+    .transcript { padding: 15px; }
+
+    .message + .message {
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+    }
+
+    .message-label {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    .message-label.user { color: var(--user); }
+    .message-label.agent { color: var(--agent); }
+    .message-label .rule { flex: 1; height: 1px; background: var(--border); }
+
+    .message p { margin-bottom: 9px; color: var(--text); }
+    .message p:last-child { margin-bottom: 0; }
+
+    .markdown-h1,
+    .markdown-h2,
+    .markdown-h3 { margin: 16px 0 7px; font-weight: 700; }
+    .markdown-h1 { color: var(--primary); font-size: 17px; }
+    .markdown-h2 { color: var(--teal); font-size: 15px; }
+    .markdown-h3 { color: var(--activity); font-size: 14px; font-style: italic; }
+
+    .inline-code {
+      padding: 2px 5px;
+      border: 1px solid var(--border);
+      background: var(--code-surface);
+      color: var(--link);
+    }
+
+    .code-block {
+      margin: 12px 0;
+      padding: 13px 15px;
+      overflow: auto;
+      border-left: 2px solid var(--primary);
+      background: var(--code-surface);
+      color: var(--link);
+    }
+
+    .blockquote {
+      margin: 12px 0;
+      padding-left: 13px;
+      border-left: 2px solid var(--agent);
+      color: var(--agent);
+      font-style: italic;
+    }
+
+    .link { color: var(--link); text-decoration: underline; }
+    .bold { color: var(--text); font-weight: 700; }
+    .italic { color: var(--muted); font-style: italic; }
+    .hr { height: 1px; margin: 16px 0; background: var(--faint); }
+
+    .input-demo {
+      margin-top: 14px;
+      border: 1px solid var(--border-focus);
+      background: var(--canvas);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, .12);
+    }
+
+    .input-demo .input-copy {
+      min-height: 46px;
+      padding: 12px;
+      color: var(--text);
+    }
+
+    .input-demo .input-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 6px 12px;
+      border-top: 1px solid var(--border);
+      color: var(--faint);
+      font-size: 11px;
+    }
+
+    .gauge {
+      margin-bottom: 13px;
+    }
+
+    .gauge:last-child { margin-bottom: 0; }
+    .gauge-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .gauge-label strong { color: var(--text); font-weight: 400; }
+    .gauge-track { height: 7px; background: var(--code-surface); }
+    .gauge-fill { height: 100%; }
+    .fill-teal { width: 62%; background: var(--teal); }
+    .fill-blue { width: 43%; background: var(--user); }
+    .fill-warning { width: 76%; background: var(--warning); }
+    .fill-error { width: 93%; background: var(--error); }
+
+    .sparkline {
+      display: flex;
+      align-items: end;
+      gap: 4px;
+      height: 54px;
+      padding: 8px 0 0;
+    }
+
+    .sparkline i {
+      flex: 1;
+      min-width: 4px;
+      background: var(--teal);
+      opacity: .9;
+    }
+
+    .n-a { color: var(--faint); }
+
+    .modal-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .modal-stage {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 490px;
+      padding: 22px;
+      background: var(--canvas);
+    }
+
+    .modal {
+      width: 100%;
+      max-width: 520px;
+      border: 1px solid var(--border-focus);
+      background: var(--modal);
+      box-shadow: 0 18px 44px var(--shadow);
+    }
+
+    .modal-title {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .modal-body { padding: 16px; }
+
+    .modal-footer {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      color: var(--faint);
+      font-size: 11px;
+      text-align: right;
+    }
+
+    .session-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 9px 10px;
+      color: var(--text);
+    }
+
+    .session-row + .session-row { border-top: 1px solid rgba(51, 67, 78, .55); }
+    .session-row.selected { background: var(--primary); color: var(--canvas); font-weight: 700; }
+    .session-row.selected .session-meta { color: var(--canvas); opacity: .76; }
+    .session-marker { color: var(--primary); }
+    .session-row.selected .session-marker { color: var(--canvas); }
+    .session-meta { color: var(--faint); font-size: 11px; white-space: nowrap; }
+
+    .modal-section-title {
+      margin: 3px 0 10px;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+    }
+
+    .help-row {
+      display: grid;
+      grid-template-columns: 145px 1fr;
+      gap: 10px;
+      padding: 5px 0;
+      color: var(--muted);
+    }
+
+    .key { color: var(--primary); font-weight: 700; }
+    .command { color: var(--link); font-weight: 700; }
+    .modal-spacer { height: 17px; }
+
+    .role-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+    }
+
+    .role-card { padding: 16px; }
+    .role-card p { margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+    .role-sample { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+
+    .sample {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      background: var(--canvas);
+      font-size: 12px;
+    }
+
+    .sample.primary { color: var(--primary); }
+    .sample.muted { color: var(--muted); }
+    .sample.faint { color: var(--faint); }
+    .sample.user { color: var(--user); }
+    .sample.agent { color: var(--agent); }
+    .sample.activity { color: var(--activity); }
+    .sample.warning { color: var(--warning); }
+    .sample.error { color: var(--error); }
+    .sample.success { color: var(--success); }
+    .sample.key-hint { color: var(--canvas); background: var(--primary); font-weight: 700; }
+    .sample.selected { color: var(--canvas); background: var(--primary); font-weight: 700; }
+    .sample.border-focus { border-color: var(--border-focus); color: var(--text); }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+    }
+
+    .state-card {
+      padding: 14px;
+      border-left: 3px solid currentColor;
+      background: var(--panel);
+    }
+
+    .state-card strong { display: block; margin-bottom: 3px; }
+    .state-card span { color: var(--muted); font-size: 12px; }
+    .state-card.activity { color: var(--activity); }
+    .state-card.warning { color: var(--warning); }
+    .state-card.error { color: var(--error); }
+    .state-card.success { color: var(--success); }
+
+    .footer-note {
+      margin-top: 42px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    code { color: var(--primary); }
+
+    @media (max-width: 900px) {
+      .app-grid, .modal-grid { grid-template-columns: 1fr; }
+      .modal-stage { min-height: auto; padding: 14px; }
+    }
+
+    @media (max-width: 620px) {
+      .page { width: min(100% - 24px, 1440px); padding-top: 28px; }
+      .terminal-bar { align-items: flex-start; flex-direction: column; padding: 12px 14px; }
+      .help-row { grid-template-columns: 1fr; gap: 0; }
+      .session-row { align-items: flex-start; flex-direction: column; gap: 2px; }
+      .session-meta { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="eyebrow">Veritas / visual system</div>
+      <h1>Quiet Mission Control</h1>
+      <p class="lede">A calm, high-signal terminal instrument panel for talking to local models: truthful telemetry, focused conversation, and restrained command-console chrome.</p>
+      <div class="notice"><strong>PROPOSED</strong><span>Reference page for the shared Veritas style direction</span></div>
+    </header>
+
+    <section class="section" aria-labelledby="palette-title">
+      <h2 id="palette-title">01 / Restrained palette</h2>
+      <p class="section-intro">Cyan and teal provide structure. Blue and mint identify conversation roles. Amber signals activity or pressure. Red is reserved for errors and danger.</p>
+      <div class="card">
+        <div class="swatches">
+          <div class="swatch light-text" style="--swatch: var(--canvas)"><div class="swatch-name">canvas</div><div class="swatch-value">#080C10</div><div class="swatch-role">main terminal background</div></div>
+          <div class="swatch light-text" style="--swatch: var(--panel)"><div class="swatch-name">panel</div><div class="swatch-value">#0F171D</div><div class="swatch-role">raised application region</div></div>
+          <div class="swatch light-text" style="--swatch: var(--modal)"><div class="swatch-name">modal</div><div class="swatch-value">#111D24</div><div class="swatch-role">overlay surface</div></div>
+          <div class="swatch light-text" style="--swatch: var(--code-surface)"><div class="swatch-name">code-surface</div><div class="swatch-value">#16212A</div><div class="swatch-role">code and preformatted text</div></div>
+          <div class="swatch light-text" style="--swatch: var(--border)"><div class="swatch-name">border</div><div class="swatch-value">#33434E</div><div class="swatch-role">quiet borders and dividers</div></div>
+          <div class="swatch light-text" style="--swatch: var(--primary)"><div class="swatch-name">primary</div><div class="swatch-value">#22D3EE</div><div class="swatch-role">titles, focus, navigation</div></div>
+          <div class="swatch light-text" style="--swatch: var(--teal)"><div class="swatch-name">teal</div><div class="swatch-value">#2DD4BF</div><div class="swatch-role">secondary accent, telemetry</div></div>
+          <div class="swatch light-text" style="--swatch: var(--text)"><div class="swatch-name">text</div><div class="swatch-value">#E6EDF3</div><div class="swatch-role">main readable content</div></div>
+          <div class="swatch light-text" style="--swatch: var(--muted)"><div class="swatch-name">muted</div><div class="swatch-value">#94A3B8</div><div class="swatch-role">descriptions and metadata</div></div>
+          <div class="swatch light-text" style="--swatch: var(--faint)"><div class="swatch-name">faint</div><div class="swatch-value">#64748B</div><div class="swatch-role">hints and separators</div></div>
+          <div class="swatch light-text" style="--swatch: var(--user)"><div class="swatch-name">user</div><div class="swatch-value">#7DD3FC</div><div class="swatch-role">user identity</div></div>
+          <div class="swatch light-text" style="--swatch: var(--agent)"><div class="swatch-name">agent</div><div class="swatch-value">#A7F3D0</div><div class="swatch-role">agent identity</div></div>
+          <div class="swatch light-text" style="--swatch: var(--activity)"><div class="swatch-name">activity</div><div class="swatch-value">#FBBF24</div><div class="swatch-role">streaming and active work</div></div>
+          <div class="swatch light-text" style="--swatch: var(--warning)"><div class="swatch-name">warning</div><div class="swatch-value">#F59E0B</div><div class="swatch-role">recoverable pressure</div></div>
+          <div class="swatch light-text" style="--swatch: var(--error)"><div class="swatch-name">error</div><div class="swatch-value">#F87171</div><div class="swatch-role">failures and danger</div></div>
+          <div class="swatch light-text" style="--swatch: var(--success)"><div class="swatch-name">success</div><div class="swatch-value">#34D399</div><div class="swatch-role">completed operations</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="roles-title">
+      <h2 id="roles-title">02 / Reusable visual roles</h2>
+      <p class="section-intro">These semantic roles are intended to become theme tokens. A component should ask for a role such as <code>key_hint</code> or <code>modal_surface</code>, not choose a raw color.</p>
+      <div class="token-groups">
+        <div class="token-group"><h3>Surfaces</h3><div class="token-list"><div class="token-row"><code>canvas()</code><span>base surface</span></div><div class="token-row"><code>panel()</code><span>raised region</span></div><div class="token-row"><code>modal_surface()</code><span>overlay</span></div><div class="token-row"><code>code_surface()</code><span>preformatted</span></div></div></div>
+        <div class="token-group"><h3>Chrome</h3><div class="token-list"><div class="token-row"><code>border()</code><span>quiet frame</span></div><div class="token-row"><code>border_focus()</code><span>active frame</span></div><div class="token-row"><code>title()</code><span>panel title</span></div><div class="token-row"><code>section_title()</code><span>interior heading</span></div></div></div>
+        <div class="token-group"><h3>Text</h3><div class="token-list"><div class="token-row"><code>text()</code><span>main content</span></div><div class="token-row"><code>muted()</code><span>secondary copy</span></div><div class="token-row"><code>faint()</code><span>supporting copy</span></div><div class="token-row"><code>hint()</code><span>short instruction</span></div></div></div>
+        <div class="token-group"><h3>Interaction</h3><div class="token-list"><div class="token-row"><code>key_hint()</code><span>keyboard key</span></div><div class="token-row"><code>command_hint()</code><span>slash command</span></div><div class="token-row"><code>selected_row()</code><span>active selection</span></div><div class="token-row"><code>empty_state()</code><span>next action</span></div></div></div>
+        <div class="token-group"><h3>Conversation</h3><div class="token-list"><div class="token-row"><code>user_label()</code><span>user marker</span></div><div class="token-row"><code>user_text()</code><span>user body</span></div><div class="token-row"><code>agent_label()</code><span>agent marker</span></div><div class="token-row"><code>agent_text()</code><span>agent body</span></div></div></div>
+        <div class="token-group"><h3>State + telemetry</h3><div class="token-list"><div class="token-row"><code>activity()</code><span>streaming</span></div><div class="token-row"><code>warning()</code><span>pressure</span></div><div class="token-row"><code>error()</code><span>failure</span></div><div class="token-row"><code>gauge_ctx(ratio)</code><span>health scale</span></div></div></div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="app-title">
+      <h2 id="app-title">03 / Application surface</h2>
+      <p class="section-intro">The transcript is the visual center. The sidebar behaves like truthful instrumentation. Structural chrome stays quiet so conversation and live state remain legible.</p>
+      <div class="terminal">
+        <div class="terminal-bar"><div class="brand">VERITAS / LOCAL SESSION</div><div class="status-line">◆ streaming · Esc to stop</div></div>
+        <div class="app-grid">
+          <div class="app-column">
+            <div class="block">
+              <div class="block-title"><span>Chat</span><small>follow tail</small></div>
+              <div class="transcript">
+                <div class="message">
+                  <div class="message-label user"><span>◆ You</span><span class="rule"></span></div>
+                  <p>Give me a short plan for checking the context window before a long session.</p>
+                </div>
+                <div class="message">
+                  <div class="message-label agent"><span>◆ Agent</span><span class="rule"></span></div>
+                  <div class="markdown-h1"># Check the context budget</div>
+                  <p>Start with the live <span class="inline-code">CTX</span> value in the sidebar, then leave room for the next response.</p>
+                  <div class="markdown-h2">## Keep the signal visible</div>
+                  <p>Use a <span class="bold">clear threshold</span>, keep the response readable, and treat <span class="link">telemetry as truth</span>.</p>
+                  <div class="blockquote">Context pressure should be visible before it becomes a surprise.</div>
+                  <div class="code-block">let remaining = ctx_window.saturating_sub(ctx_used);
+if remaining &lt; reserve { show_warning(); }</div>
+                  <div class="markdown-h3">### Small details matter</div>
+                  <p class="italic">A restrained interface makes important changes easier to notice.</p>
+                </div>
+              </div>
+            </div>
+            <div class="input-demo"><div class="input-copy">/help</div><div class="input-footer"><span>Enter send · Shift+Enter newline</span><span>ready</span></div></div>
+          </div>
+          <aside class="sidebar">
+            <div class="block" style="margin-bottom: 12px"><div class="block-title">Veritas Agent</div><div style="padding: 12px"><div class="token-row"><code>model</code><span>jan-nano</span></div><div class="token-row"><code>ctx</code><span>16k tok</span></div><div class="token-row"><code>temp</code><span>engine</span></div><div class="token-row"><code>base</code><span>localhost</span></div></div></div>
+            <div class="block" style="padding: 13px">
+              <div class="gauge"><div class="gauge-label"><span>VRAM</span><strong>62%</strong></div><div class="gauge-track"><div class="gauge-fill fill-teal"></div></div></div>
+              <div class="gauge"><div class="gauge-label"><span>RAM</span><strong>43%</strong></div><div class="gauge-track"><div class="gauge-fill fill-blue"></div></div></div>
+              <div class="gauge"><div class="gauge-label"><span>GPU %</span><strong>active</strong></div><div class="sparkline" aria-label="GPU activity sparkline"><i style="height: 28%"></i><i style="height: 46%"></i><i style="height: 38%"></i><i style="height: 66%"></i><i style="height: 52%"></i><i style="height: 80%"></i><i style="height: 63%"></i><i style="height: 92%"></i><i style="height: 74%"></i><i style="height: 84%"></i></div></div>
+              <div class="gauge"><div class="gauge-label"><span>CTX</span><strong>12,160 / 16,000</strong></div><div class="gauge-track"><div class="gauge-fill fill-warning"></div></div></div>
+              <div class="gauge"><div class="gauge-label"><span>GPU source</span><strong class="n-a">n/a</strong></div></div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="modal-title">
+      <h2 id="modal-title">04 / Shared modal language</h2>
+      <p class="section-intro">Sessions and help use the same centered shell, opaque surface, focus border, short title, content spacing, and footer hint. Their content widgets differ; their identity does not.</p>
+      <div class="modal-grid">
+        <div class="modal-stage">
+          <section class="modal" aria-label="Sessions modal example">
+            <div class="modal-title">Sessions</div>
+            <div class="modal-body">
+              <div class="session-row selected"><span><span class="session-marker">› </span>Project notes</span><span class="session-meta">12 msgs · 2m ago</span></div>
+              <div class="session-row"><span><span class="session-marker">  </span>Research chat</span><span class="session-meta">28 msgs · 1h ago</span></div>
+              <div class="session-row"><span><span class="session-marker">  </span>Local model test</span><span class="session-meta">6 msgs · 1d ago</span></div>
+            </div>
+            <div class="modal-footer">↑↓ navigate · PgUp/PgDn jump · Enter load · Esc close</div>
+          </section>
+        </div>
+        <div class="modal-stage">
+          <section class="modal" aria-label="Help modal example">
+            <div class="modal-title">Help</div>
+            <div class="modal-body">
+              <div class="modal-section-title">KEYBOARD</div>
+              <div class="help-row"><span class="key">Enter</span><span>Send message</span></div>
+              <div class="help-row"><span class="key">Shift+Enter</span><span>Newline in input</span></div>
+              <div class="help-row"><span class="key">Esc</span><span>Stop stream / close overlay</span></div>
+              <div class="help-row"><span class="key">Ctrl-S</span><span>Open session picker</span></div>
+              <div class="modal-spacer"></div>
+              <div class="modal-section-title">COMMANDS</div>
+              <div class="help-row"><span class="command">/help</span><span>Show this help</span></div>
+              <div class="help-row"><span class="command">/sessions</span><span>Open session picker</span></div>
+              <div class="help-row"><span class="command">/clear</span><span>Clear transcript</span></div>
+            </div>
+            <div class="modal-footer">Esc close</div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="heading-title">
+      <h2 id="heading-title">05 / Heading and content hierarchy</h2>
+      <p class="section-intro">Headings use nearby accent shades to create hierarchy without turning markdown into a separate rainbow system.</p>
+      <div class="role-grid">
+        <div class="role-card"><h3>H1 / primary</h3><p>Major content heading or application-level emphasis.</p><div class="markdown-h1" style="margin-top: 0"># Context budget</div></div>
+        <div class="role-card"><h3>H2 / teal</h3><p>Section heading inside an agent response.</p><div class="markdown-h2" style="margin-top: 0">## Keep the signal visible</div></div>
+        <div class="role-card"><h3>H3 / activity</h3><p>Small detail heading with a restrained active accent.</p><div class="markdown-h3" style="margin-top: 0">### Small details matter</div></div>
+        <div class="role-card"><h3>Content modifiers</h3><p>Modifiers add meaning before another color is introduced.</p><div class="role-sample"><span class="sample"><strong>bold</strong></span><span class="sample italic">italic</span><span class="sample"><span class="link">link</span></span><span class="sample" style="color: var(--link); background: var(--code-surface)">code</span></div></div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="state-title">
+      <h2 id="state-title">06 / State and interaction</h2>
+      <p class="section-intro">Color is reserved for changes in state, focus, or meaning. The same roles should be recognizable in the status line, sidebar, transcript, and overlays.</p>
+      <div class="state-grid">
+        <div class="state-card activity"><strong>◆ Streaming</strong><span>Activity is happening now.</span></div>
+        <div class="state-card warning"><strong>! Context pressure</strong><span>Attention is needed, but recovery is possible.</span></div>
+        <div class="state-card error"><strong>× Request failed</strong><span>The user needs an actionable error.</span></div>
+        <div class="state-card success"><strong>✓ Session saved</strong><span>The operation completed successfully.</span></div>
+      </div>
+      <div class="role-grid" style="margin-top: 12px">
+        <div class="role-card"><h3>Key hints</h3><p>Keyboard actions are visible but compact.</p><div class="role-sample"><span class="sample key-hint">Enter</span><span class="sample key-hint">Ctrl-S</span><span class="sample key-hint">Esc</span></div></div>
+        <div class="role-card"><h3>Selection</h3><p>A selected row uses the primary accent as a filled, high-contrast state.</p><div class="role-sample"><span class="sample selected">› Project notes</span></div></div>
+        <div class="role-card"><h3>Focus</h3><p>Focused controls use the focus border, not a new decorative color.</p><div class="role-sample"><span class="sample border-focus">Input / focused</span></div></div>
+      </div>
+    </section>
+
+    <p class="footer-note">Reference only — the browser preview is a visual aid for the Rust theme in <code>src/theme.rs</code>. It has no external dependencies and does not define runtime behavior.</p>
+  </main>
+</body>
+</html>
