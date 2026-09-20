@@ -384,7 +384,7 @@ impl<'a> App<'a> {
                 },
                 None => self.copy_code_block(None),
             },
-            Some("sessions") => self.open_picker(),
+            Some("sessions") | Some("session") => self.open_picker(),
             Some("export") => match parts.next() {
                 Some(path) => self.export_session(path),
                 None => self.status = "Usage: /export <file>".to_string(),
@@ -821,5 +821,48 @@ mod tests {
         let blocks = extract_code_blocks(vec![text]);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0], "int x = 42;");
+    }
+
+    #[test]
+    fn test_handle_command_session_alias() {
+        let (meta_tx, _meta_rx) = unbounded_channel();
+        let mut app = App {
+            messages: Vec::new(),
+            input: TextArea::default(),
+            scroll: 0,
+            follow: true,
+            streaming: false,
+            spinner_idx: 0,
+            status: String::new(),
+            config: Config {
+                base_url: "http://localhost:11434/v1".to_string(),
+                api_key: String::new(),
+                model: "test-model".to_string(),
+            },
+            stats: SysStats::new(),
+            rx: None,
+            pending: String::new(),
+            temperature_override: None,
+            ctx_window: None,
+            session_id: None,
+            session_title: None,
+            session_created: 0,
+            last_saved_len: 0,
+            picker: None,
+            help_open: false,
+            shimmer_phase: 0.0,
+            meta_tx,
+            meta_rx: None,
+        };
+
+        // Test /sessions opens picker
+        app.handle_command("sessions");
+        assert!(app.picker.is_some());
+        app.close_picker();
+        assert!(app.picker.is_none());
+
+        // Test /session alias opens picker
+        app.handle_command("session");
+        assert!(app.picker.is_some());
     }
 }

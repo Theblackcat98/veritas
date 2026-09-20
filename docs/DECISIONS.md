@@ -372,4 +372,30 @@ Rules:
   - Implement `VERITAS_THEME` environment variable supporting `default`, `amber`, `green`, and `monochrome` palettes via `theme::Preset` and `theme::Palette`.
 - **Consequences:** Word boundaries remain intact across wraps; GPU graph displays instant real-time telemetry; scroll navigation works seamlessly across all keyboards; code blocks can be copied with one keystroke; theme presets function without adding configuration files or new crates.
 
+## D027 — `/session` alias and Phase 5 slash command live preview popup roadmap entry
+- **Date:** 2026-09-19
+- **Status:** accepted
+- **Context:**
+  1. Users naturally type `/session` in addition to `/sessions` when opening the session picker from the command bar.
+  2. Users need command discoverability without interrupting their workflow by opening the modal `/help` overlay. A live, non-modal tooltip preview popup when typing `/` helps discover commands with fuzzy matching.
+- **Decision:**
+  - Add `Some("sessions") | Some("session")` match arm in `app::handle_command` and update user-facing docs.
+  - Approve Phase 5 on `docs/ROADMAP.md` specifying an inline temporary preview popup triggered when input begins with `/`, providing command tooltips and fuzzy matching against available commands.
+- **Consequences:** Typing `/session` opens the session picker identically to `/sessions`. Phase 5 is formalized in the project roadmap as the canonical plan for live command completion and preview.
+
+## D028 — Roadmap Phase 6: llama.cpp engine launcher from chat with config file command definition
+- **Date:** 2026-09-19
+- **Status:** accepted
+- **Context:**
+  1. Veritas is local-first, frequently paired with a locally compiled `llama-server` (or `llama.cpp` server).
+  2. Users currently have to switch terminal windows or multiplexers to launch or restart their local `llama-server`.
+  3. `llama-server` commands typically require complex, user-specific command flags (`-m model.gguf -c 8192 -ngl 99 --port 8080`), which are impractical to enter interactively in chat or pass through purely flat environment variables without fragility.
+  4. D001 ("Configuration via environment variables only") noted: *"A TOML/JSON config requires a new decision."*
+- **Decision:**
+  - Approve Phase 6 in `docs/ROADMAP.md` to support launching a `llama.cpp` server process directly from chat.
+  - Allow an optional single configuration file (e.g. `~/.config/veritas/config.toml` following XDG conventions) specifically defining the `run` command / command-line arguments to launch the local `llama.cpp` server, without turning Veritas into a config-heavy application.
+  - Manage process lifecycle (spawn child process, monitor readiness/health, clean up child on exit).
+- **Consequences:** Expands Veritas configuration scope from env-var only to allowing an optional single config file for host process execution commands. Keeps the core chat client identity while removing friction for local LLM hackers.
+
+
 

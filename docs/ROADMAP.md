@@ -56,6 +56,19 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - CI: build + clippy (.github/workflows/ci.yml) ✅
 - `--version` flag ✅ (D025), README screenshots
 
+## Phase 5 — Command autocompletion & live preview 🧭
+
+- Live command preview popup triggered immediately when user input begins with `/` (temporary floating overlay above the input area, not a modal like `/help`)
+- Live tooltips/descriptions for available slash commands
+- Fuzzy find matching and filtering of commands as the query is typed
+- Seamless dismissal on backspace, Esc, or non-command input
+
+## Phase 6 — Local engine launcher (llama.cpp) 🧭
+
+- Start a `llama.cpp` server directly from chat via a slash command (e.g. `/llamacpp start` or `/engine start`)
+- Run command template / binary path configured in a local config file (e.g. `~/.config/veritas/config.toml` under XDG config home)
+- Lifecycle management: start process in background, monitor process status / health check endpoint, display readiness in status bar, and stop on shutdown or via slash command
+
 ## Explicitly rejected 🚫
 
 | Idea                          | Why rejected                                    |

@@ -57,7 +57,7 @@ Type in the input box:
 |---|---|
 | `/help` | Show help overlay (keybindings and commands) |
 | `/copy [n]` | Copy latest code block (or block *n*) to system clipboard |
-| `/sessions` | Open the session picker (same as Ctrl-S) |
+| `/sessions`, `/session` | Open the session picker (same as Ctrl-S) |
 | `/export <file>` | Write the transcript as markdown |
 | `/model <id>` | Switch model (takes effect on next send; re-probes ctx window) |
 | `/temp <0.0-2.0>` | Override sampling temperature — bare `/temp` shows the effective setting |
