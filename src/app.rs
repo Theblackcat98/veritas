@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
@@ -302,6 +302,48 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Copy a code block from the transcript to the clipboard (D026).
+    /// `target`: None copies the latest code block; Some(n) copies block n (1-indexed).
+    pub fn copy_code_block(&mut self, target: Option<usize>) {
+        let contents = self
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .chain(std::iter::once(self.pending.as_str()).filter(|s| !s.is_empty()));
+        let blocks = extract_code_blocks(contents);
+
+        if blocks.is_empty() {
+            self.status = "No code blocks found in transcript.".to_string();
+            return;
+        }
+
+        let total = blocks.len();
+        let (idx, is_latest) = match target {
+            None => (total - 1, true),
+            Some(n) => {
+                if n == 0 || n > total {
+                    self.status = format!("Invalid code block #{n} (available: 1..{total}).");
+                    return;
+                }
+                (n - 1, n == total)
+            }
+        };
+
+        let block = &blocks[idx];
+        let lines_count = block.lines().count();
+
+        if copy_to_clipboard(block) {
+            let label = if is_latest {
+                format!("block {total}/{total} (latest, {lines_count} lines)")
+            } else {
+                format!("block {}/{total} ({lines_count} lines)", idx + 1)
+            };
+            self.status = format!("Copied {label} to clipboard.");
+        } else {
+            self.status = "Failed to copy to clipboard.".to_string();
+        }
+    }
+
     fn history_for_api(&self) -> Vec<WireMessage> {
         self.messages
             .iter()
@@ -335,6 +377,13 @@ impl<'a> App<'a> {
             Some("help") => {
                 self.open_help();
             }
+            Some("copy") => match parts.next() {
+                Some(v) => match v.parse::<usize>() {
+                    Ok(n) => self.copy_code_block(Some(n)),
+                    Err(_) => self.status = "Usage: /copy [1-based index]".to_string(),
+                },
+                None => self.copy_code_block(None),
+            },
             Some("sessions") => self.open_picker(),
             Some("export") => match parts.next() {
                 Some(path) => self.export_session(path),
@@ -538,6 +587,9 @@ where
         }
         match event::read()? {
             Event::Key(key) => {
+                if key.kind != event::KeyEventKind::Press {
+                    continue;
+                }
                 // Global shortcuts first.
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
@@ -563,35 +615,38 @@ where
                     app.open_picker();
                     continue;
                 }
-                match key.code {
-                    KeyCode::Esc if app.streaming => {
-                        app.cancel_stream();
-                        continue;
-                    }
-                    KeyCode::PageUp => {
-                        app.follow = false;
-                        app.scroll = app.scroll.saturating_sub(10);
-                        // Clamp will happen in render based on actual content height
-                        continue;
-                    }
-                    KeyCode::PageDown => {
-                        app.scroll = app.scroll.saturating_add(10).min(MAX_SCROLL);
-                        // Clamp and follow re-engagement happen in render based on actual content height
-                        continue;
-                    }
-                    KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {
-                        app.send_current();
-                        continue;
-                    }
-                    _ => {}
-                }
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
-                    app.follow = false;
-                    app.scroll = app.scroll.saturating_sub(10);
+                // Ctrl-Y: copy latest code block to clipboard (D026).
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char('y')
+                {
+                    app.copy_code_block(None);
                     continue;
                 }
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('d') {
-                    app.scroll = app.scroll.saturating_add(10).min(MAX_SCROLL);
+                // Esc: cancel active stream
+                if key.code == KeyCode::Esc && app.streaming {
+                    app.cancel_stream();
+                    continue;
+                }
+                // Enter: send message
+                if key.code == KeyCode::Enter && !key.modifiers.contains(KeyModifiers::SHIFT) {
+                    app.send_current();
+                    continue;
+                }
+                // Page up / scroll up: PgUp, Shift+Up, Ctrl+Up, Ctrl-U
+                let is_scroll_up = key.code == KeyCode::PageUp
+                    || (key.code == KeyCode::Up && (key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::CONTROL)))
+                    || (key.code == KeyCode::Char('u') && key.modifiers.contains(KeyModifiers::CONTROL));
+                if is_scroll_up {
+                    app.follow = false;
+                    app.scroll = app.scroll.saturating_sub(15);
+                    continue;
+                }
+                // Page down / scroll down: PgDn, Shift+Down, Ctrl+Down, Ctrl-D
+                let is_scroll_down = key.code == KeyCode::PageDown
+                    || (key.code == KeyCode::Down && (key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::CONTROL)))
+                    || (key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL));
+                if is_scroll_down {
+                    app.scroll = app.scroll.saturating_add(15).min(MAX_SCROLL);
                     continue;
                 }
                 // Everything else goes to the textarea.
@@ -611,5 +666,160 @@ where
             Event::Resize(_, _) => {}
             _ => {}
         }
+    }
+}
+
+/// RFC 4648 standard base64 encoding (zero dependencies).
+pub fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+
+        result.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
+
+        if chunk.len() > 1 {
+            result.push(TABLE[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+
+        if chunk.len() > 2 {
+            result.push(TABLE[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+fn copy_via_osc52(text: &str) -> io::Result<()> {
+    let encoded = base64_encode(text.as_bytes());
+    let mut stdout = io::stdout().lock();
+    if std::env::var("TMUX").is_ok() {
+        write!(stdout, "\x1bPtmux;\x1b\x1b]52;c;{}\x07\x1b\\", encoded)?;
+    } else {
+        write!(stdout, "\x1b]52;c;{}\x07", encoded)?;
+    }
+    stdout.flush()
+}
+
+fn copy_via_command(cmd: &str, args: &[&str], text: &str) -> io::Result<()> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(text.as_bytes())?;
+    }
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other("command failed"))
+    }
+}
+
+pub fn copy_to_clipboard(text: &str) -> bool {
+    let mut command_success = false;
+
+    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        if copy_via_command("wl-copy", &[], text).is_ok() {
+            command_success = true;
+        }
+    } else if std::env::var("DISPLAY").is_ok() {
+        if copy_via_command("xclip", &["-selection", "clipboard"], text).is_ok()
+            || copy_via_command("xsel", &["--clipboard", "--input"], text).is_ok()
+        {
+            command_success = true;
+        }
+    } else if cfg!(target_os = "macos") && copy_via_command("pbcopy", &[], text).is_ok() {
+        command_success = true;
+    }
+
+    let osc52_success = copy_via_osc52(text).is_ok();
+    command_success || osc52_success
+}
+
+pub fn extract_code_blocks<'a>(contents: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut blocks = Vec::new();
+    for content in contents {
+        let mut fence_len = 0;
+        let mut current_block = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            if fence_len == 0 {
+                let backticks = trimmed.chars().take_while(|&c| c == '`').count();
+                if backticks >= 3 {
+                    fence_len = backticks;
+                    current_block.clear();
+                }
+            } else {
+                let fence_trimmed = trimmed.trim_end();
+                let backticks = fence_trimmed.chars().take_while(|&c| c == '`').count();
+                if backticks >= fence_len && fence_trimmed.len() == backticks {
+                    fence_len = 0;
+                    blocks.push(current_block.join("\n"));
+                    current_block.clear();
+                } else {
+                    current_block.push(line);
+                }
+            }
+        }
+        if fence_len > 0 && !current_block.is_empty() {
+            blocks.push(current_block.join("\n"));
+        }
+    }
+    blocks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base64_encode() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn test_extract_code_blocks() {
+        let text1 = "Here is some text:\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\nAnd more text.";
+        let text2 = "```python\nprint('hello')\n```";
+        let blocks = extract_code_blocks(vec![text1, text2]);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0], "fn main() {\n    println!(\"hi\");\n}");
+        assert_eq!(blocks[1], "print('hello')");
+    }
+
+    #[test]
+    fn test_extract_nested_fences() {
+        let text = "````markdown\n```rust\nlet x = 1;\n```\n````";
+        let blocks = extract_code_blocks(vec![text]);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], "```rust\nlet x = 1;\n```");
+    }
+
+    #[test]
+    fn test_extract_unclosed_block() {
+        let text = "```c\nint x = 42;";
+        let blocks = extract_code_blocks(vec![text]);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], "int x = 42;");
     }
 }

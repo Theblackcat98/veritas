@@ -84,10 +84,50 @@ impl StyleSheet for VeritasMd {
     }
 }
 
-/// Wrap one styled ratatui line to `width` display columns, preserving the
-/// style of every span. Line-aware (respects the renderer's indentation
-/// prefixes); Unicode-width aware so CJK content doesn't overflow.
+struct StyledToken<'a> {
+    text: &'a str,
+    style: Style,
+    is_whitespace: bool,
+    width: usize,
+}
+
+fn tokenize_line<'a>(line: &'a Line<'_>) -> Vec<StyledToken<'a>> {
+    let mut tokens = Vec::new();
+    for span in &line.spans {
+        let content = span.content.as_ref();
+        if content.is_empty() {
+            continue;
+        }
+        let chars: Vec<(usize, char)> = content.char_indices().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let is_ws = chars[i].1.is_whitespace();
+            let chunk_start = chars[i].0;
+            while i < chars.len() && chars[i].1.is_whitespace() == is_ws {
+                i += 1;
+            }
+            let chunk_end = if i < chars.len() {
+                chars[i].0
+            } else {
+                content.len()
+            };
+            let text = &content[chunk_start..chunk_end];
+            tokens.push(StyledToken {
+                text,
+                style: span.style,
+                is_whitespace: is_ws,
+                width: unicode_width::UnicodeWidthStr::width(text),
+            });
+        }
+    }
+    tokens
+}
+
+/// Wrap one styled ratatui line to `width` display columns using word-aware wrapping,
+/// preserving the style of every span. Never breaks words unless an individual word
+/// exceeds the column width. Unicode-width aware so CJK content doesn't overflow.
 fn wrap_line(line: &Line<'_>, width: usize, out: &mut Vec<Line<'static>>) {
+    let width = width.max(1);
     let total: usize = line.spans.iter().map(|s| s.width()).sum();
     if total <= width {
         let owned: Vec<Span<'static>> = line
@@ -98,28 +138,58 @@ fn wrap_line(line: &Line<'_>, width: usize, out: &mut Vec<Line<'static>>) {
         out.push(Line::from(owned));
         return;
     }
-    let mut row: Vec<Span<'static>> = Vec::new();
-    let mut used = 0usize;
-    for span in &line.spans {
-        let mut chunk = String::new();
-        for ch in span.content.chars() {
-            let cw = ch.width().unwrap_or(0);
-            if used + cw > width && (!chunk.is_empty() || !row.is_empty()) {
-                if !chunk.is_empty() {
-                    row.push(Span::styled(std::mem::take(&mut chunk), span.style));
-                }
-                out.push(Line::from(std::mem::take(&mut row)));
-                used = 0;
+
+    let tokens = tokenize_line(line);
+    let mut current_row: Vec<Span<'static>> = Vec::new();
+    let mut current_width = 0usize;
+    let initial_line = out.is_empty();
+
+    for token in tokens {
+        if token.is_whitespace {
+            // Drop leading whitespace at the start of wrapped lines, but keep on initial line for indentation
+            if current_row.is_empty() && !initial_line {
+                continue;
             }
-            chunk.push(ch);
-            used += cw;
-        }
-        if !chunk.is_empty() {
-            row.push(Span::styled(chunk, span.style));
+            if current_width + token.width <= width {
+                current_row.push(Span::styled(token.text.to_string(), token.style));
+                current_width += token.width;
+            } else {
+                if !current_row.is_empty() {
+                    out.push(Line::from(std::mem::take(&mut current_row)));
+                    current_width = 0;
+                }
+            }
+        } else {
+            // Word token
+            if current_width + token.width <= width {
+                current_row.push(Span::styled(token.text.to_string(), token.style));
+                current_width += token.width;
+            } else {
+                // Word doesn't fit on current row: break to next line
+                if !current_row.is_empty() {
+                    out.push(Line::from(std::mem::take(&mut current_row)));
+                    current_width = 0;
+                }
+                if token.width <= width {
+                    current_row.push(Span::styled(token.text.to_string(), token.style));
+                    current_width += token.width;
+                } else {
+                    // Single word exceeds full column width: break by character
+                    for ch in token.text.chars() {
+                        let cw = ch.width().unwrap_or(0);
+                        if current_width + cw > width && !current_row.is_empty() {
+                            out.push(Line::from(std::mem::take(&mut current_row)));
+                            current_width = 0;
+                        }
+                        current_row.push(Span::styled(ch.to_string(), token.style));
+                        current_width += cw;
+                    }
+                }
+            }
         }
     }
-    if !row.is_empty() {
-        out.push(Line::from(row));
+    if !current_row.is_empty() {
+        out.push(Line::from(current_row));
     }
 }
 
@@ -245,5 +315,21 @@ mod tests {
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
             .collect();
         assert!(text.contains("let x = 42;"));
+    }
+
+    #[test]
+    fn render_wrapped_never_splits_words() {
+        // "This is a solid answer" at width 12:
+        // "This is a " (10) fits, "solid" (5) would make 15 > 12,
+        // so "solid" must move to the next line intact and NOT become "s\nolid"
+        let md = "This is a solid answer";
+        let lines = render_wrapped(md, 12);
+        assert_eq!(lines.len(), 2);
+        let line1: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let line2: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(line1.trim(), "This is a");
+        assert_eq!(line2.trim(), "solid answer");
+        assert!(!line1.ends_with('s') || line1.trim().ends_with("This is a"));
+        assert!(line2.starts_with("solid"));
     }
 }

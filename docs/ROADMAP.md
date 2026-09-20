@@ -45,15 +45,15 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - ~~Lightweight markdown for agent messages~~ → ✅ full markdown via
   `tui-markdown` (D015 supersedes the lightweight scope; code blocks get
   syntax highlighting)
-- Keyboard copy of code-block contents 🔜
+- Keyboard copy of code-block contents (`/copy [n]`, `Ctrl-Y`) ✅ (D026)
 - Readability pass on the theme (spacing, label styling) 🔜
 - Streaming shimmer on the status line ✅ (D017)
 
 ## Phase 4 — Polish & release 🧭
 
-- Theme presets selectable via env var (still one theme file)
+- Theme presets selectable via env var `VERITAS_THEME` (`default`, `amber`, `green`, `monochrome`) ✅ (D026)
 - Help overlay modal listing keybindings via `/help` ✅ (D018/D022; `?` shortcut rejected per D024)
-- CI: build + clippy
+- CI: build + clippy (.github/workflows/ci.yml) ✅
 - `--version` flag ✅ (D025), README screenshots
 
 ## Explicitly rejected 🚫

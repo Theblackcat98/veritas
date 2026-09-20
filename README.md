@@ -31,6 +31,7 @@ Everything comes from environment variables:
 | `OPENAI_BASE_URL` | `http://localhost:11434/v1` | API base (Ollama default shown) |
 | `OPENAI_API_KEY` | *(empty)* | Bearer token; omitted from requests when unset |
 | `OPENAI_MODEL` | `jan-nano` | Model id |
+| `VERITAS_THEME` | `default` | Theme preset: `default`, `amber`, `green`, or `monochrome` |
 
 Engine-owned parameters are not client config: requests omit `temperature`
 unless you override it at runtime with `/temp`, and the context window is
@@ -55,6 +56,7 @@ Type in the input box:
 | Command | Effect |
 |---|---|
 | `/help` | Show help overlay (keybindings and commands) |
+| `/copy [n]` | Copy latest code block (or block *n*) to system clipboard |
 | `/sessions` | Open the session picker (same as Ctrl-S) |
 | `/export <file>` | Write the transcript as markdown |
 | `/model <id>` | Switch model (takes effect on next send; re-probes ctx window) |
@@ -81,6 +83,7 @@ cargo run --release
 
 - `Enter` — send · `Shift+Enter` — newline
 - `Esc` — stop streaming / close overlays · `Ctrl-S` — session picker · `Ctrl-C` / `Ctrl-Q` — quit
+- `Ctrl-Y` — copy latest code block to system clipboard (OSC 52 + desktop tool)
 - `/help` — show help overlay; `?` is entered as chat text
-- `PgUp`/`PgDn` or `Ctrl-U`/`Ctrl-D` or mouse wheel — scroll
+- `PgUp`/`PgDn` or `Shift+Up`/`Down` or `Ctrl+Up`/`Down` or `Ctrl-U`/`Ctrl-D` or mouse wheel — scroll
 - In the picker: `↑`/`↓` select · `PgUp`/`PgDn` jump · `Enter` load · `Esc` cancel

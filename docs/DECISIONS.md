@@ -353,3 +353,23 @@ Rules:
   - Add `--version` / `-V` CLI flag.
 - **Consequences:** All widgets render cleanly on standard 80×24 terminals. Both Ollama and llama.cpp report real context window totals and live token usage. Unexpected panics do not break user terminals. No new dependencies added.
 
+
+## D026 — Theme presets via `VERITAS_THEME`, real-time GPU history slice, word wrapping boundaries, and code-block clipboard copy
+- **Date:** 2026-09-19
+- **Status:** accepted
+- **Context:**
+  1. Users reported text wrapping split words mid-character across lines (e.g. `s\nolid`).
+  2. The GPU utilization sparkline lagged ~15 seconds behind real-time.
+  3. `PgUp` and `PgDn` keys were inconsistent across terminals and laptop keyboards lacking dedicated navigation keys; released key events duplicated navigation.
+  4. Phase 3 called for keyboard copying of code blocks (`/copy` and `Ctrl-Y`).
+  5. Phase 4 called for theme presets selectable via an environment variable (`VERITAS_THEME`) without breaking the single-theme-file rule.
+- **Decision:**
+  - Tokenize markdown lines at word boundaries (`md_style::tokenize_line`) before wrapping to prevent splitting words mid-character.
+  - Slice the most recent `inner_width` samples (`&gpu_history[len - inner_width..]`) for Ratatui's `Sparkline` widget instead of passing the entire buffer, because `Sparkline` renders `.iter().take(width)` from the beginning.
+  - In `app.rs`, filter out non-Press key events (`key.kind != KeyEventKind::Press`) to prevent duplicate events on enhanced terminals; add `Shift+Up`/`Down`, `Ctrl+Up`/`Down`, and `Ctrl-U`/`Ctrl-D` navigation aliases; increase step size to 15 rows.
+  - Implement zero-dependency base64 encoding (RFC 4648) and dual-layer clipboard copy: emit ANSI OSC 52 sequence (`\x1b]52;c;{base64}\x07` with tmux passthrough detection) and fallback/pipe to native desktop tools (`wl-copy`, `xclip`, `xsel`, `pbcopy`).
+  - Wire `/copy [n]` command and `Ctrl-Y` key to copy the latest (or selected) code block extracted from the session transcript.
+  - Implement `VERITAS_THEME` environment variable supporting `default`, `amber`, `green`, and `monochrome` palettes via `theme::Preset` and `theme::Palette`.
+- **Consequences:** Word boundaries remain intact across wraps; GPU graph displays instant real-time telemetry; scroll navigation works seamlessly across all keyboards; code blocks can be copied with one keystroke; theme presets function without adding configuration files or new crates.
+
+

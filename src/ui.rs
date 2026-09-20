@@ -164,7 +164,7 @@ fn cmd_row(cmd: &str, desc: &str) -> Line<'static> {
 
 /// Centered help overlay showing all keybindings (like the session picker).
 fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
-    let popup_h = 20.min(area.height);
+    let popup_h = 22.min(area.height);
     let top_pad = area.height.saturating_sub(popup_h) / 2;
     let vert = Layout::default()
         .direction(Direction::Vertical)
@@ -191,12 +191,14 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
         key_row("Esc", "Cancel stream / close overlay"),
         key_row("Ctrl-C / Ctrl-Q", "Quit"),
         key_row("PgUp / PgDn", "Scroll transcript"),
-        key_row("Ctrl-U / Ctrl-D", "Scroll up/down 10 lines"),
+        key_row("Ctrl-U / Ctrl-D", "Scroll up / down"),
+        key_row("Ctrl-Y", "Copy latest code block"),
         key_row("Ctrl-S", "Open session picker"),
         Line::from(""),
         Line::from(Span::styled("COMMANDS", Theme::section_title())),
         cmd_row("/help", "Show this help"),
         cmd_row("/clear", "Clear transcript"),
+        cmd_row("/copy [n]", "Copy code block to clipboard"),
         cmd_row("/sessions", "Open session picker"),
         cmd_row("/export <file>", "Export transcript as markdown"),
         cmd_row("/model <id>", "Set model"),
@@ -468,10 +470,18 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     );
 
     // GPU sparkline — real history; blank box until data exists.
+    // Ratatui's Sparkline takes data.iter().take(width), so we pass the most
+    // recent window of samples so the right edge is always real-time.
     let gpu_title = if vram.is_some() {
         " GPU % "
     } else {
         " GPU % n/a "
+    };
+    let inner_width = (rows[5].width as usize).saturating_sub(2);
+    let history_slice = if app.stats.gpu_history.len() > inner_width {
+        &app.stats.gpu_history[app.stats.gpu_history.len() - inner_width..]
+    } else {
+        &app.stats.gpu_history[..]
     };
     let spark = Sparkline::default()
         .block(
@@ -482,7 +492,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .style(Theme::panel()),
         )
         .style(Theme::gauge_gpu())
-        .data(&app.stats.gpu_history)
+        .data(history_slice)
         .max(100);
     f.render_widget(spark, rows[5]);
 
