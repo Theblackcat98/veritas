@@ -21,7 +21,8 @@ endpoint — Ollama, llama.cpp server, OpenAI, OpenRouter, vLLM, etc.
   DRM sysfs), context-window usage from server-reported tokens when available
 - Slash commands with status-line feedback
 - Live `/` command popup: fuzzy-finds the closest slash command above the
-  input with a one-line description (D031)
+  input with a one-line description; `↑`/`↓` select, `Tab` completes,
+  `Enter` runs (D031/D033)
 - Sidebar hide/show via `Ctrl-B` or `/sidebar`; auto-hides below 72×20 (D032)
 - Single-file theme (`src/theme.rs`) for reskinning
 
@@ -66,6 +67,7 @@ Type in the input box:
 | `/temp <0.0-2.0>` | Override sampling temperature — bare `/temp` shows the effective setting |
 | `/clear` | Reset the conversation (next save starts a new session) |
 | `/sidebar` | Toggle sidebar visibility (same as Ctrl-B; auto-hides below 72×20) |
+| `/quit` | Exit the app (same as Ctrl-C / Ctrl-Q) |
 
 ## Sessions
 
@@ -88,5 +90,5 @@ cargo run --release
 - `Esc` — stop streaming / dismiss `/` popup / close overlays · `Ctrl-S` — session picker · `Ctrl-B` — toggle sidebar · `Ctrl-C` / `Ctrl-Q` — quit
 - `Ctrl-Y` — copy latest code block to system clipboard (OSC 52 + desktop tool)
 - `/help` — show help overlay; `?` is entered as chat text
-- `/` at the start of input — live fuzzy command popup (closest match highlighted)
+- `/` at the start of input — live fuzzy command popup: `↑`/`↓` select · `Tab` completes the highlighted signature · `Enter` runs it · `Esc` dismisses
 - `PgUp`/`PgDn` or `Ctrl-U`/`Ctrl-D` — scroll

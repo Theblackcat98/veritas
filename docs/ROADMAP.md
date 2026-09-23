@@ -60,6 +60,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - CI: build + clippy (.github/workflows/ci.yml) ✅
 - `--version` flag ✅ (D025), README screenshots
 - Sidebar visibility: `Ctrl-B` / `/sidebar` toggle; auto-hides below 72×20 (D032) ✅
+- `/quit` exits the app (D034) ✅
 
 ## Phase 5 — Command autocompletion & live preview ✅
 
@@ -67,6 +68,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - Live tooltips/descriptions for available slash commands ✅ (D031)
 - Fuzzy find matching and filtering of commands as the query is typed ✅ (D031)
 - Seamless dismissal on backspace, Esc, or non-command input ✅ (D031)
+- ↑/↓ select a row, Tab completes the highlighted signature, Enter runs the highlighted command (D033) ✅
 
 ## Phase 6 — Local engine launcher (llama.cpp) 🧭
 
@@ -115,4 +117,5 @@ New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 | Ctrl-Y                       | Copy latest code block     | ✅ D026|
 | Ctrl-B                       | Toggle sidebar             | ✅ D032|
 | `/` (input prefix)           | Command popup (fuzzy)      | ✅ D031|
+| ↑/↓ · Tab · Enter (popup)    | Select · complete · run    | ✅ D033|
 

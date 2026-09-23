@@ -167,18 +167,19 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
-/// Phase 5 (D031): tiny non-modal popup floating directly above the input
-/// block. Guidance only — keys never route here; Enter still sends.
+/// Phase 5 (D031/D033): tiny non-modal popup floating directly above the
+/// input block. ↑/↓ move the selection, Tab completes, Enter runs — key
+/// routing lives in `app::run`; this only draws.
 fn draw_cmd_popup(f: &mut Frame, app: &App, input_area: ratatui::layout::Rect) {
     let matches = app.cmd_popup_matches();
     if matches.is_empty() {
         return;
     }
-    // Grow one row per match, clamped to the space above the input.
-    let want_h = matches.len() as u16 + 2; // + borders
+    // Grow one row per match + footer, clamped to the space above the input.
+    let want_h = matches.len() as u16 + 3; // + borders + footer
     let max_h = input_area.y.max(3);
     let height = want_h.min(max_h);
-    let shown = matches.iter().take(height.saturating_sub(2) as usize);
+    let shown = matches.iter().take(height.saturating_sub(3) as usize);
     // Fit the longest (command + description) row, clamped to the input width.
     let want_w = matches
         .iter()
@@ -196,6 +197,11 @@ fn draw_cmd_popup(f: &mut Frame, app: &App, input_area: ratatui::layout::Rect) {
 
     let modal = modal_block("Commands");
     let inner = modal.inner(popup);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
     f.render_widget(Clear, popup);
     f.render_widget(modal, popup);
 
@@ -208,12 +214,21 @@ fn draw_cmd_popup(f: &mut Frame, app: &App, input_area: ratatui::layout::Rect) {
         })
         .collect();
     let mut state = ListState::default();
-    state.select(Some(0)); // closest match highlighted
+    if !items.is_empty() {
+        let sel = app.cmd_popup_selected.min(items.len() - 1);
+        state.select(Some(sel));
+    }
     let list = List::new(items)
         .style(Theme::modal_surface())
         .highlight_style(Theme::selected_row())
         .highlight_symbol("› ");
-    f.render_stateful_widget(list, inner, &mut state);
+    f.render_stateful_widget(list, sections[0], &mut state);
+    f.render_widget(
+        Paragraph::new("↑↓ select · Tab complete · Enter run · Esc dismiss")
+            .style(Theme::hint())
+            .alignment(Alignment::Right),
+        sections[1],
+    );
 }
 
 fn key_row(key: &str, desc: &str) -> Line<'static> {
@@ -236,7 +251,7 @@ fn cmd_row(cmd: &str, desc: &str) -> Line<'static> {
 
 /// Centered help overlay showing all keybindings (like the session picker).
 fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
-    // 20 content rows + 2 borders + footer: fits a standard 24-row terminal.
+    // 22 content rows + 2 borders + footer: fits a standard 24-row terminal.
     let popup_h = 24.min(area.height);
     let top_pad = area.height.saturating_sub(popup_h) / 2;
     let vert = Layout::default()
@@ -268,6 +283,8 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
         key_row("Ctrl-Y", "Copy latest code block"),
         key_row("Ctrl-S", "Open session picker"),
         key_row("Ctrl-B", "Toggle sidebar"),
+        // Tab/↑↓ only matter inside the `/` popup, which documents them
+        // in its own footer (D033) — help stays one screen on 24 rows.
         Line::from(""),
         Line::from(Span::styled("COMMANDS", Theme::section_title())),
         cmd_row("/help", "Show this help"),
@@ -276,6 +293,7 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
         cmd_row("/sessions", "Open session picker"),
         cmd_row("/export <file>", "Export transcript as markdown"),
         cmd_row("/model <id>", "Set model"),
+        cmd_row("/quit", "Exit Veritas"),
         cmd_row("/temp <0.0-2.0>", "Set temperature (overrides engine)"),
         cmd_row("/sidebar", "Toggle sidebar visibility"),
     ];
@@ -1071,6 +1089,25 @@ mod tests {
             !text.contains("Commands"),
             "Esc-dismiss hides popup:\n{text}"
         );
+    }
+
+    #[tokio::test]
+    async fn cmd_popup_footer_documents_bindings() {
+        let mut app = test_app();
+        app.input.insert_str("/");
+        let text = render(&mut app, 80, 24);
+        assert!(
+            text.contains("Tab complete"),
+            "popup footer lists bindings:\n{text}"
+        );
+        assert!(
+            text.contains("Enter run"),
+            "popup footer lists Enter:\n{text}"
+        );
+        // Selected row tracks cmd_popup_selected (clamped in draw).
+        app.cmd_popup_selected = 2;
+        let text = render(&mut app, 80, 24);
+        assert!(text.contains("Commands"), "still open:\n{text}");
     }
 
     #[tokio::test]

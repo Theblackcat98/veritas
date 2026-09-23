@@ -75,6 +75,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/export <file>", "Export transcript as markdown"),
     ("/help", "Show this help"),
     ("/model <id>", "Set model — bare re-detects"),
+    ("/quit", "Exit Veritas"),
     ("/session", "Open session picker (alias)"),
     ("/sessions", "Open session picker"),
     ("/sidebar", "Toggle sidebar visibility"),
@@ -182,6 +183,10 @@ pub struct App<'a> {
     pub sidebar_effective: bool,
     /// Esc dismissed the `/` popup until the input text changes (D031).
     pub cmd_popup_dismissed: bool,
+    /// Selected row in the `/` popup (D033); reset on text change.
+    pub cmd_popup_selected: usize,
+    /// `/quit` raised this flag; `run` exits after the event (D034).
+    pub quit: bool,
     /// Phase (0.0..1.0) of the streaming shimmer sweep (D017).
     pub shimmer_phase: f32,
     meta_tx: UnboundedSender<(String, Option<u64>)>,
@@ -227,6 +232,8 @@ impl<'a> App<'a> {
             sidebar_override: None,
             sidebar_effective: true,
             cmd_popup_dismissed: false,
+            cmd_popup_selected: 0,
+            quit: false,
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: Some(meta_rx),
@@ -430,6 +437,51 @@ impl<'a> App<'a> {
         !self.cmd_popup_dismissed && !self.cmd_popup_matches().is_empty()
     }
 
+    /// Move the popup selection with wrap-around (D033).
+    pub fn cmd_popup_move(&mut self, delta: i32) {
+        let n = self.cmd_popup_matches().len();
+        if n == 0 {
+            return;
+        }
+        self.cmd_popup_selected =
+            (self.cmd_popup_selected as i32 + delta).rem_euclid(n as i32) as usize;
+    }
+
+    /// Tab: replace the input with the selected row's full signature so
+    /// placeholder args can be edited (D033).
+    pub fn cmd_popup_complete(&mut self) {
+        let Some((cmd, _)) = self
+            .cmd_popup_matches()
+            .get(self.cmd_popup_selected)
+            .copied()
+        else {
+            return;
+        };
+        self.input = TextArea::default();
+        self.input.insert_str(cmd);
+        self.cmd_popup_dismissed = false;
+    }
+
+    /// Enter: run the selected command's first token only — never the
+    /// placeholder text (so `/export <file>` bare shows the usage hint) (D033).
+    pub fn cmd_popup_run(&mut self) {
+        let Some((cmd, _)) = self
+            .cmd_popup_matches()
+            .get(self.cmd_popup_selected)
+            .copied()
+        else {
+            return;
+        };
+        let name = cmd
+            .trim_start_matches('/')
+            .split(' ')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        self.input = TextArea::default();
+        self.handle_command(&name);
+    }
+
     /// Modal key routing while the picker is open (D013).
     pub fn handle_picker_key(&mut self, code: KeyCode) {
         match code {
@@ -581,6 +633,7 @@ impl<'a> App<'a> {
             },
             Some("sessions") | Some("session") => self.open_picker(),
             Some("sidebar") => self.toggle_sidebar(),
+            Some("quit") => self.quit = true,
             Some("export") => {
                 // Take the rest of the line so paths with spaces work.
                 let rest = cmd.get("export".len()..).unwrap_or("").trim();
@@ -797,6 +850,11 @@ where
     let mut last_spinner = Instant::now();
 
     loop {
+        // `/quit` (D034) — checked at loop top so it fires whether the
+        // event path `continue`d or fell through; same cleanup as Ctrl-C.
+        if app.quit {
+            return Ok(());
+        }
         terminal.draw(|f| crate::ui::draw(f, &mut app))?;
 
         let animating = app.streaming || (app.probing_ctx && app.ctx_window.is_none());
@@ -876,9 +934,35 @@ where
                         continue;
                     }
                 }
-                // Enter: send message
+                // While the popup is open: ↑/↓ select, Tab completes (D033).
+                // Modifier-carrying arrows keep their scroll meaning.
+                let unmodified = !key.modifiers.contains(KeyModifiers::SHIFT)
+                    && !key.modifiers.contains(KeyModifiers::CONTROL);
+                if app.cmd_popup_visible() && unmodified {
+                    match key.code {
+                        KeyCode::Up => {
+                            app.cmd_popup_move(-1);
+                            continue;
+                        }
+                        KeyCode::Down => {
+                            app.cmd_popup_move(1);
+                            continue;
+                        }
+                        KeyCode::Tab => {
+                            app.cmd_popup_complete();
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                // Enter: send — or run the highlighted command while the
+                // popup is open (D033).
                 if key.code == KeyCode::Enter && !key.modifiers.contains(KeyModifiers::SHIFT) {
-                    app.send_current();
+                    if app.cmd_popup_visible() {
+                        app.cmd_popup_run();
+                    } else {
+                        app.send_current();
+                    }
                     continue;
                 }
                 // Page up / scroll up: PgUp, Shift+Up, Ctrl+Up, Ctrl-U
@@ -910,6 +994,7 @@ where
                 app.input.input(Input::from(Event::Key(key)));
                 if app.input.lines().join("\n") != before {
                     app.cmd_popup_dismissed = false;
+                    app.cmd_popup_selected = 0;
                 }
             }
             Event::Mouse(me) => match me.kind {
@@ -1117,6 +1202,8 @@ mod tests {
             sidebar_override: None,
             sidebar_effective: true,
             cmd_popup_dismissed: false,
+            cmd_popup_selected: 0,
+            quit: false,
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: None,
@@ -1208,6 +1295,8 @@ mod tests {
             sidebar_override: None,
             sidebar_effective: true,
             cmd_popup_dismissed: false,
+            cmd_popup_selected: 0,
+            quit: false,
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: None,
@@ -1274,6 +1363,8 @@ mod tests {
             sidebar_override: None,
             sidebar_effective: true,
             cmd_popup_dismissed: false,
+            cmd_popup_selected: 0,
+            quit: false,
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: None,
@@ -1304,5 +1395,98 @@ mod tests {
         app.input = TextArea::default();
         app.input.insert_str("/zz");
         assert!(!app.cmd_popup_visible());
+    }
+
+    #[test]
+    fn popup_arrows_select_tab_completes_enter_runs() {
+        let (meta_tx, _meta_rx) = unbounded_channel();
+        let (model_tx, _model_rx) = unbounded_channel::<Option<String>>();
+        let mut app = App {
+            messages: Vec::new(),
+            input: TextArea::default(),
+            scroll: 0,
+            follow: true,
+            streaming: false,
+            spinner_tick: 0,
+            probing_ctx: false,
+            model: Some("test-model".to_string()),
+            probing_model: false,
+            status: String::new(),
+            config: Config {
+                base_url: "http://localhost:11434/v1".to_string(),
+                api_key: String::new(),
+                model: Some("test-model".to_string()),
+            },
+            stats: SysStats::new(),
+            rx: None,
+            stream_task: None,
+            pending: String::new(),
+            temperature_override: None,
+            ctx_window: None,
+            session_id: None,
+            session_title: None,
+            session_created: 0,
+            last_saved_len: 0,
+            picker: None,
+            help_open: false,
+            sidebar_override: None,
+            sidebar_effective: true,
+            cmd_popup_dismissed: false,
+            cmd_popup_selected: 0,
+            quit: false,
+            shimmer_phase: 0.0,
+            meta_tx,
+            meta_rx: None,
+            model_tx,
+            model_rx: None,
+        };
+
+        // `/s` matches session, sessions, sidebar (declaration order).
+        app.input.insert_str("/s");
+        let n = app.cmd_popup_matches().len();
+        assert!(n >= 3, "need several matches, got {n}");
+
+        // ↓ / ↑ wrap around.
+        app.cmd_popup_move(1);
+        assert_eq!(app.cmd_popup_selected, 1);
+        app.cmd_popup_move(-1);
+        assert_eq!(app.cmd_popup_selected, 0);
+        app.cmd_popup_move(-1);
+        assert_eq!(app.cmd_popup_selected, n - 1, "wrap past top");
+
+        // Tab completes the highlighted signature into the input.
+        app.cmd_popup_selected = 0; // /session
+        app.cmd_popup_complete();
+        assert_eq!(app.input.lines().join("\n"), "/session");
+
+        // Enter on /help runs it (opens overlay); input is cleared.
+        app.input = TextArea::default();
+        app.input.insert_str("/he");
+        app.cmd_popup_selected = 0;
+        app.cmd_popup_run();
+        assert!(app.help_open, "Enter runs the highlighted command");
+        assert!(
+            app.input.lines().join("\n").is_empty(),
+            "input cleared after run"
+        );
+        app.close_help();
+
+        // /export <file> runs as bare `export` → usage hint, never writing
+        // a literal file named `<file>`.
+        app.input = TextArea::default();
+        app.input.insert_str("/export");
+        app.cmd_popup_selected = 0;
+        assert_eq!(app.cmd_popup_matches()[0].0, "/export <file>");
+        app.cmd_popup_run();
+        assert_eq!(app.status, "Usage: /export <file>");
+
+        // /quit sets the exit flag; the run loop returns on it.
+        app.input = TextArea::default();
+        app.input.insert_str("/qu");
+        app.cmd_popup_selected = 0;
+        assert_eq!(app.cmd_popup_matches()[0].0, "/quit");
+        assert!(!app.quit);
+        app.cmd_popup_run();
+        assert!(app.quit, "/quit raises the exit flag");
     }
 }

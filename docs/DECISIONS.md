@@ -60,6 +60,8 @@ Rules:
 | [D030](#d030--no-default-model-auto-detect-from-engine-models) | 2026-09-23 | accepted (qualifies [D001](#d001--configuration-via-environment-variables-only)) | Config / Provider | No hardcoded default model; auto-detect via `GET /models`; `n/a` fallback |
 | [D031](#d031--phase-5-command-popup-hand-rolled-fuzzy-match-floating-above-input) | 2026-09-23 | accepted (implements [D027](#d027--session-alias-and-phase-5-slash-command-live-preview-popup-roadmap-entry)) | Commands / UI | `/` popup: zero-dep fuzzy match, `COMMANDS` catalog, floating above input |
 | [D032](#d032--sidebar-visibility-ctrl-b--sidebar-toggle-with-size-based-auto-hide) | 2026-09-23 | accepted | UI / Layout | `Ctrl-B`//`sidebar` toggle; auto-hide below 72×20; session override |
+| [D033](#d033--command-popup-keyboard-arrows-select-tab-completes-enter-runs) | 2026-09-23 | accepted (extends [D031](#d031--phase-5-command-popup-hand-rolled-fuzzy-match-floating-above-input)) | Commands / UI | ↑/↓ select · Tab completes signature · Enter runs highlighted command |
+| [D034](#d034--quit-command) | 2026-09-23 | accepted | Commands | `/quit` exits the app (slash-command twin of Ctrl-C/Ctrl-Q) |
 
 ---
 
@@ -494,3 +496,27 @@ Rules:
   - `Ctrl-B` and bare `/sidebar` flip visibility relative to whatever is currently effective — so from auto-hidden you force-show, from shown you hide. Manual override wins over auto for the rest of the session (no reset command; restart clears it).
   - When hidden, layout is a single full-width column — the sidebar is not drawn at all (never faked with zeros).
 - **Consequences:** Transcript gains 32 columns on narrow terminals. Resize does not clear a manual override. Tests lock auto-hide (60×30) and override behavior (80×24).
+
+## D033 — Command popup keyboard: arrows select, Tab completes, Enter runs
+- **Date:** 2026-09-23
+- **Status:** accepted (extends D031)
+- **Context:**
+  1. D031 shipped the popup as pure guidance — no way to pick a row without retyping the full command.
+  2. Users expect the classic completion trio: move the highlight, fill the line, execute.
+  3. `Enter` must keep its send meaning when no popup is visible, and plain `↑/↓` must keep moving the textarea cursor when no popup is visible.
+- **Decision:**
+  - While the popup is visible: unmodified `↑`/`↓` move the selection with wrap-around (`cmd_popup_selected`, reset to row 0 on any text change); unmodified `Tab` replaces the input with the selected row's full signature (e.g. `/export <file>`) so placeholders can be edited; `Enter` runs the selected command's **first token only** through `handle_command` — never the placeholder text (so `/export <file>` run bare yields the usage hint, it does not write a file named `<file>`).
+  - When the popup is not visible, `Enter`/`↑`/`↓`/`Tab` behave exactly as before (send / textarea cursor).
+  - Popup footer documents the bindings: `↑↓ select · Tab complete · Enter run · Esc dismiss`.
+- **Consequences:** No new keys outside the popup scope; scroll bindings (`Shift/Ctrl+↑/↓`, PgUp/PgDn) are unaffected because they carry modifiers. `/help` and README list Tab and the popup footer. Typing a query with args (e.g. `/model llama3`) hides the popup, so Enter sends the typed line as before.
+
+## D034 — `/quit` command
+- **Date:** 2026-09-23
+- **Status:** accepted
+- **Context:**
+  1. Keyboard-first users have Ctrl-C/Ctrl-Q, but slash-command users reasonably expect `/quit` (or `/exit`) to appear in the popup and help like every other action.
+  2. `handle_command` cannot exit the process directly — it only mutates `App`; the `run` loop owns process lifetime (D002).
+- **Decision:**
+  - Add `/quit` (no alias — one name keeps the catalog small): sets `App::quit = true`; `app::run` returns `Ok(())` after the event that raised it, restoring the terminal exactly like Ctrl-C/Ctrl-Q.
+  - Listed in `COMMANDS`, the help overlay, and README.
+- **Consequences:** No new exit path — funnels through the same cleanup as the existing key quits. Raw-mode/alternate-screen restore is unchanged (main.rs + panic hook).
