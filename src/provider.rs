@@ -1,7 +1,15 @@
+use std::time::Duration;
+
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::time::timeout;
+
+/// No bytes for this long = hung server; fail instead of spinning forever.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Guard against unbounded growth on a line without a newline (D004).
+const MAX_LINE_BUF: usize = 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
@@ -65,7 +73,7 @@ struct Usage {
 }
 
 /// POST {base}/chat/completions with SSE, forwarding delta.content as Token events.
-/// `base` like http://localhost:11434/v1, `model` like llama3.1 / gpt-4o-mini.
+/// `base` like http://localhost:11434/v1, `model` an engine-specific id (D030).
 pub async fn stream_chat(
     base: String,
     api_key: String,
@@ -111,9 +119,23 @@ pub async fn stream_chat(
     }
 
     let mut stream = resp.bytes_stream();
-    let mut buf = String::new();
+    // Bytes, not String: multi-byte UTF-8 may split across network chunks.
+    // Decoding only complete lines keeps char boundaries safe — `\n` never
+    // occurs inside a multi-byte sequence.
+    let mut buf: Vec<u8> = Vec::new();
 
-    while let Some(item) = stream.next().await {
+    loop {
+        let item = match timeout(IDLE_TIMEOUT, stream.next()).await {
+            Ok(Some(item)) => item,
+            Ok(None) => break,
+            Err(_) => {
+                let _ = tx.send(StreamEvent::Error(format!(
+                    "stream idle timeout ({}s)",
+                    IDLE_TIMEOUT.as_secs()
+                )));
+                return;
+            }
+        };
         let chunk = match item {
             Ok(c) => c,
             Err(e) => {
@@ -121,49 +143,101 @@ pub async fn stream_chat(
                 return;
             }
         };
-        buf.push_str(&String::from_utf8_lossy(&chunk));
+        buf.extend_from_slice(&chunk);
 
-        // Process complete lines; keep remainder in buf.
+        // Process complete lines; keep the byte remainder in buf.
         let mut consumed_upto = 0usize;
-        for line in buf.split_inclusive('\n') {
-            if !line.ends_with('\n') {
+        let mut done = false;
+        let mut err: Option<String> = None;
+        for line in buf.split_inclusive(|&b| b == b'\n') {
+            if !line.ends_with(b"\n") {
                 break;
             }
             consumed_upto += line.len();
+            let line = String::from_utf8_lossy(line);
             let line = line.trim();
             if line.is_empty() || !line.starts_with("data:") {
                 continue;
             }
             let data = line.trim_start_matches("data:").trim();
             if data == "[DONE]" {
-                let _ = tx.send(StreamEvent::Done);
-                return;
+                done = true;
+                break;
             }
-            if let Ok(parsed) = serde_json::from_str::<ChatChunk>(data) {
-                if let Some(u) = parsed.usage {
-                    let _ = tx.send(StreamEvent::Usage {
-                        prompt_tokens: u.prompt_tokens,
-                        completion_tokens: u.completion_tokens,
-                    });
-                }
-                for choice in parsed.choices {
-                    if let Some(text) = choice.delta.content {
-                        if !text.is_empty() {
-                            let _ = tx.send(StreamEvent::Token(text));
+            match serde_json::from_str::<ChatChunk>(data) {
+                Ok(parsed) => {
+                    if let Some(u) = parsed.usage {
+                        let _ = tx.send(StreamEvent::Usage {
+                            prompt_tokens: u.prompt_tokens,
+                            completion_tokens: u.completion_tokens,
+                        });
+                    }
+                    for choice in parsed.choices {
+                        if let Some(text) = choice.delta.content {
+                            if !text.is_empty() {
+                                let _ = tx.send(StreamEvent::Token(text));
+                            }
                         }
                     }
+                }
+                Err(_) => {
+                    let snippet: String = data.chars().take(120).collect();
+                    err = Some(format!("bad stream chunk: {snippet}"));
+                    break;
                 }
             }
         }
         if consumed_upto > 0 {
             buf.drain(..consumed_upto);
         }
-        // Guard against unbounded growth on a line without newline.
-        if buf.len() > 1024 * 1024 {
-            buf.clear();
+        if let Some(e) = err {
+            let _ = tx.send(StreamEvent::Error(e));
+            return;
+        }
+        if done {
+            let _ = tx.send(StreamEvent::Done);
+            return;
+        }
+        if buf.len() > MAX_LINE_BUF {
+            let _ = tx.send(StreamEvent::Error(format!(
+                "stream line exceeded {} KiB",
+                MAX_LINE_BUF / 1024
+            )));
+            return;
         }
     }
     let _ = tx.send(StreamEvent::Done);
+}
+
+/// Probe `GET {base}/models` and return the first model id (D030). None on
+/// any error or empty list — the sidebar then shows `n/a`.
+pub async fn fetch_models(base: String, api_key: String) -> Option<String> {
+    let url = format!("{}/models", base.trim_end_matches('/'));
+    let client = Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap_or_else(|_| Client::new());
+    let mut req = client.get(&url);
+    if !api_key.is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().await.ok()?;
+    parse_first_model(&v)
+}
+
+/// OpenAI-shaped `{ "data": [ { "id": ... } ] }` — shared by Ollama,
+/// llama.cpp server, vLLM, and OpenRouter.
+fn parse_first_model(v: &serde_json::Value) -> Option<String> {
+    v.get("data")?
+        .as_array()?
+        .first()?
+        .get("id")?
+        .as_str()
+        .map(str::to_string)
 }
 
 /// Best-effort probe of the model's context window from the inference
@@ -355,5 +429,23 @@ mod tests {
 
         let v3 = serde_json::json!({});
         assert_eq!(parse_llama_cpp_props(&v3), None);
+    }
+
+    #[test]
+    fn parse_first_model_reads_openai_shaped_data_array() {
+        let v = serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "llama3.2", "object": "model" },
+                { "id": "qwen2.5", "object": "model" }
+            ]
+        });
+        assert_eq!(parse_first_model(&v).as_deref(), Some("llama3.2"));
+        assert_eq!(parse_first_model(&serde_json::json!({})), None);
+        assert_eq!(parse_first_model(&serde_json::json!({ "data": [] })), None);
+        assert_eq!(
+            parse_first_model(&serde_json::json!({ "data": [{ "object": "model" }] })),
+            None
+        );
     }
 }

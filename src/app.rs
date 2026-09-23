@@ -24,11 +24,22 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     pub base_url: String,
     pub api_key: String,
-    pub model: String,
+    /// `OPENAI_MODEL` when explicitly set; None = auto-detect (D030).
+    pub model: Option<String>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"***")
+            .field("model", &self.model)
+            .finish()
+    }
 }
 
 impl Config {
@@ -36,7 +47,7 @@ impl Config {
         let base_url = std::env::var("OPENAI_BASE_URL")
             .unwrap_or_else(|_| "http://localhost:11434/v1".to_string());
         let api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
-        let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "llama3.1".to_string());
+        let model = std::env::var("OPENAI_MODEL").ok().filter(|s| !s.is_empty());
         Self {
             base_url,
             api_key,
@@ -45,9 +56,8 @@ impl Config {
     }
 }
 
-pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 /// Transcript scroll ceiling. Doubles as the u16 overflow guard for
-/// ratatui 0.29's `area.height + scroll` and bounds the follow-tail range
+/// ratatui 0.30's `area.height + scroll` and bounds the follow-tail range
 /// (D011).
 pub const MAX_SCROLL: u16 = 60_000;
 
@@ -64,15 +74,21 @@ pub struct App<'a> {
     pub scroll: u16,
     pub follow: bool,
     pub streaming: bool,
-    pub spinner_idx: usize,
     /// Tick counter for tui-spinner widgets (D029).
     pub spinner_tick: u64,
     /// Whether the model context window is actively being probed from the engine.
     pub probing_ctx: bool,
+    /// Active model id; None = engine unknown → sidebar shows `n/a` (D030).
+    pub model: Option<String>,
+    /// Whether a `GET /models` probe is in flight (D030).
+    pub probing_model: bool,
     pub status: String,
     pub config: Config,
     pub stats: SysStats,
     rx: Option<UnboundedReceiver<StreamEvent>>,
+    /// Handle of the in-flight stream task — aborted on Esc-cancel so the
+    /// HTTP body stops downloading (refines D002's drop-the-receiver).
+    stream_task: Option<tokio::task::JoinHandle<()>>,
     pub pending: String,
     /// Runtime `/temp` override; None = engine's own temperature (D009).
     pub temperature_override: Option<f32>,
@@ -95,6 +111,8 @@ pub struct App<'a> {
     pub shimmer_phase: f32,
     meta_tx: UnboundedSender<(String, Option<u64>)>,
     meta_rx: Option<UnboundedReceiver<(String, Option<u64>)>>,
+    model_tx: UnboundedSender<Option<String>>,
+    model_rx: Option<UnboundedReceiver<Option<String>>>,
 }
 
 impl<'a> App<'a> {
@@ -102,6 +120,8 @@ impl<'a> App<'a> {
         let mut input = TextArea::default();
         input.set_placeholder_text("Type a message — Enter to send, Shift+Enter newline…");
         let (meta_tx, meta_rx) = unbounded_channel::<(String, Option<u64>)>();
+        let (model_tx, model_rx) = unbounded_channel::<Option<String>>();
+        let model = config.model.clone();
         let mut app = Self {
             // Start empty — a seeded greeting would be sent to the model as
             // if it had said it.
@@ -110,14 +130,16 @@ impl<'a> App<'a> {
             scroll: 0,
             follow: true,
             streaming: false,
-            spinner_idx: 0,
             spinner_tick: 0,
             probing_ctx: false,
+            model,
+            probing_model: false,
             status: "Ready — Enter send · PgUp/PgDn scroll · Ctrl-S sessions · Ctrl-C quit"
                 .to_string(),
             config,
             stats: SysStats::new(),
             rx: None,
+            stream_task: None,
             pending: String::new(),
             temperature_override: None,
             ctx_window: None,
@@ -130,17 +152,26 @@ impl<'a> App<'a> {
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: Some(meta_rx),
+            model_tx,
+            model_rx: Some(model_rx),
         };
-        app.spawn_ctx_probe();
+        if app.model.is_none() {
+            // No OPENAI_MODEL: ask the engine what it has (D030).
+            app.spawn_model_probe();
+        } else {
+            app.spawn_ctx_probe();
+        }
         app
     }
 
     /// Ask the inference engine for the model's context window; the answer
     /// arrives on `meta_rx` and is applied in `drain_meta` (D009).
     fn spawn_ctx_probe(&mut self) {
+        let Some(model) = self.model.clone() else {
+            return;
+        };
         self.probing_ctx = true;
         let base = self.config.base_url.clone();
-        let model = self.config.model.clone();
         let tx = self.meta_tx.clone();
         Handle::current().spawn(async move {
             let ctx = provider::fetch_context_length(base, model.clone()).await;
@@ -148,11 +179,57 @@ impl<'a> App<'a> {
         });
     }
 
+    /// Probe `GET {base}/models` and adopt the first id (D030); the answer
+    /// arrives on `model_rx` and is applied in `drain_model`.
+    fn spawn_model_probe(&mut self) {
+        self.probing_model = true;
+        let base = self.config.base_url.clone();
+        let key = self.config.api_key.clone();
+        let tx = self.model_tx.clone();
+        Handle::current().spawn(async move {
+            let m = provider::fetch_models(base, key).await;
+            let _ = tx.send(m);
+        });
+    }
+
+    fn drain_model(&mut self) {
+        let mut answer: Option<Option<String>> = None;
+        if let Some(rx) = self.model_rx.as_mut() {
+            while let Ok(m) = rx.try_recv() {
+                answer = Some(m);
+            }
+        }
+        let Some(detected) = answer else {
+            return;
+        };
+        self.probing_model = false;
+        match detected {
+            Some(id) => {
+                let changed = self.model.as_deref() != Some(id.as_str());
+                self.model = Some(id.clone());
+                if changed || self.ctx_window.is_none() {
+                    self.spawn_ctx_probe();
+                }
+                if !self.streaming {
+                    self.status = format!("Detected model {id}.");
+                }
+            }
+            None => {
+                self.model = None;
+                if !self.streaming {
+                    self.status =
+                        "No model — engine unreachable or empty. /model <id> to set manually."
+                            .to_string();
+                }
+            }
+        }
+    }
+
     fn drain_meta(&mut self) {
         if let Some(rx) = self.meta_rx.as_mut() {
             while let Ok((model, ctx)) = rx.try_recv() {
                 // Ignore stale answers for a model we've already switched away from.
-                if model == self.config.model {
+                if Some(model.as_str()) == self.model.as_deref() {
                     self.ctx_window = ctx;
                     self.probing_ctx = false;
                 }
@@ -204,8 +281,10 @@ impl<'a> App<'a> {
         match session::save(&dir, &id, Some(&title), created, &self.messages) {
             Ok(()) => {
                 self.last_saved_len = self.messages.len();
-                self.status =
-                    format!("Saved {id} · {} msgs — Ctrl-S sessions", self.messages.len());
+                self.status = format!(
+                    "Saved {id} · {} msgs — Ctrl-S sessions",
+                    self.messages.len()
+                );
             }
             Err(e) => self.status = format!("Session save failed: {e}"),
         }
@@ -265,11 +344,7 @@ impl<'a> App<'a> {
 
     /// Enter in the picker: load the highlighted session (D013).
     pub fn confirm_load(&mut self) {
-        let id = match self
-            .picker
-            .as_ref()
-            .and_then(|p| p.entries.get(p.selected))
-        {
+        let id = match self.picker.as_ref().and_then(|p| p.entries.get(p.selected)) {
             Some(e) => e.id.clone(),
             None => return,
         };
@@ -393,17 +468,28 @@ impl<'a> App<'a> {
                 None => self.copy_code_block(None),
             },
             Some("sessions") | Some("session") => self.open_picker(),
-            Some("export") => match parts.next() {
-                Some(path) => self.export_session(path),
-                None => self.status = "Usage: /export <file>".to_string(),
-            },
+            Some("export") => {
+                // Take the rest of the line so paths with spaces work.
+                let rest = cmd.get("export".len()..).unwrap_or("").trim();
+                if rest.is_empty() {
+                    self.status = "Usage: /export <file>".to_string();
+                } else {
+                    self.export_session(rest);
+                }
+            }
             Some("model") => match parts.next() {
                 Some(id) => {
-                    self.config.model = id.to_string();
+                    self.model = Some(id.to_string());
+                    self.ctx_window = None;
                     self.spawn_ctx_probe();
                     self.status = format!("Model set to {id}.");
                 }
-                None => self.status = "Usage: /model <id>".to_string(),
+                None => {
+                    // Bare /model: re-detect from the engine (D030).
+                    self.ctx_window = None;
+                    self.spawn_model_probe();
+                    self.status = "Re-detecting model from engine…".to_string();
+                }
             },
             Some("temp") => match parts.next() {
                 Some(v) => match v.parse::<f32>() {
@@ -442,6 +528,17 @@ impl<'a> App<'a> {
             self.input = TextArea::default();
             return;
         }
+        // No model known: re-probe once instead of firing a doomed request
+        // (D030). Keep the typed text so Enter can be pressed again.
+        let Some(model) = self.model.clone() else {
+            if self.probing_model {
+                self.status = "No model yet — probing engine… or /model <id>.".to_string();
+            } else {
+                self.spawn_model_probe();
+                self.status = "No model — probing engine; Enter again or /model <id>.".to_string();
+            }
+            return;
+        };
         self.messages.push(ChatMessage {
             role: Role::User,
             content: text,
@@ -463,12 +560,12 @@ impl<'a> App<'a> {
 
         let base = self.config.base_url.clone();
         let key = self.config.api_key.clone();
-        let model = self.config.model.clone();
         // None = omit temperature from the request; engine default applies.
         let temperature = self.temperature_override;
         // Fire-and-forget; results come back over `tx`. Dropping `rx` on
-        // cancel/stop makes late sends no-ops.
-        Handle::current().spawn(async move {
+        // cancel/stop makes late sends no-ops; the task handle lets Esc
+        // abort the download outright.
+        let handle = Handle::current().spawn(async move {
             provider::stream_chat(
                 base,
                 key,
@@ -479,9 +576,13 @@ impl<'a> App<'a> {
             )
             .await;
         });
+        self.stream_task = Some(handle);
     }
 
     fn cancel_stream(&mut self) {
+        if let Some(task) = self.stream_task.take() {
+            task.abort();
+        }
         self.rx = None;
         self.streaming = false;
         if !self.pending.is_empty() {
@@ -495,33 +596,48 @@ impl<'a> App<'a> {
     }
 
     fn drain_stream(&mut self) {
-        // Take the receiver out briefly so we can mutably borrow self inside.
+        // Field-disjoint borrows: `rx` is read while `pending`/`messages`
+        // are mutated below the loop.
+        use tokio::sync::mpsc::error::TryRecvError;
         let mut done = false;
         let mut err: Option<String> = None;
         if let Some(rx) = self.rx.as_mut() {
-            while let Ok(ev) = rx.try_recv() {
-                match ev {
-                    StreamEvent::Token(t) => {
-                        self.pending.push_str(&t);
-                        self.stats.ctx_used += (t.len() / 4) as u64;
-                    }
-                    StreamEvent::Usage {
-                        prompt_tokens,
-                        completion_tokens,
-                    } => {
-                        // Server-reported truth beats the chars/4 estimate (D009).
-                        self.stats.ctx_used = prompt_tokens + completion_tokens;
-                    }
-                    StreamEvent::Done => {
-                        done = true;
-                        break;
-                    }
-                    StreamEvent::Error(e) => {
-                        err = Some(e);
-                        done = true;
+            loop {
+                match rx.try_recv() {
+                    Ok(ev) => match ev {
+                        StreamEvent::Token(t) => {
+                            self.pending.push_str(&t);
+                            self.stats.ctx_used += (t.len() / 4) as u64;
+                        }
+                        StreamEvent::Usage {
+                            prompt_tokens,
+                            completion_tokens,
+                        } => {
+                            // Server-reported truth beats the chars/4 estimate (D009).
+                            self.stats.ctx_used = prompt_tokens + completion_tokens;
+                        }
+                        StreamEvent::Done => {
+                            done = true;
+                            break;
+                        }
+                        StreamEvent::Error(e) => {
+                            err = Some(e);
+                            break;
+                        }
+                    },
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        // Task died without Done/Error — finish honestly
+                        // instead of spinning forever.
+                        err = Some("stream disconnected".to_string());
                         break;
                     }
                 }
+            }
+        }
+        if err.is_some() || done {
+            if let Some(task) = self.stream_task.take() {
+                task.abort(); // no-op when the task already finished
             }
         }
         if let Some(e) = err {
@@ -550,7 +666,8 @@ impl<'a> App<'a> {
                 });
             }
             self.auto_save();
-            self.status = "Ready — Enter send · PgUp/PgDn scroll · Ctrl-S sessions".to_string();
+            self.status =
+                "Ready — Enter send · PgUp/PgDn scroll · Ctrl-S sessions · Ctrl-C quit".to_string();
         }
     }
 }
@@ -582,7 +699,6 @@ where
         }
         if animating && last_spinner.elapsed() >= Duration::from_millis(80) {
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
-            app.spinner_idx = (app.spinner_idx + 1) % SPINNER_FRAMES.len();
             // Shimmer sweep shares the spinner tick (D017): 80 ms × ~25
             // steps ≈ a 2 s sweep, matching tui-shimmer's default cadence.
             if app.streaming {
@@ -593,6 +709,7 @@ where
 
         app.drain_stream();
         app.drain_meta();
+        app.drain_model();
 
         if !event::poll(timeout)? {
             continue;
@@ -621,16 +738,12 @@ where
                     continue;
                 }
                 // Ctrl-S: save-then-list the sessions (D012/D013).
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('s')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
                     app.open_picker();
                     continue;
                 }
                 // Ctrl-Y: copy latest code block to clipboard (D026).
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('y')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('y') {
                     app.copy_code_block(None);
                     continue;
                 }
@@ -646,8 +759,11 @@ where
                 }
                 // Page up / scroll up: PgUp, Shift+Up, Ctrl+Up, Ctrl-U
                 let is_scroll_up = key.code == KeyCode::PageUp
-                    || (key.code == KeyCode::Up && (key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::CONTROL)))
-                    || (key.code == KeyCode::Char('u') && key.modifiers.contains(KeyModifiers::CONTROL));
+                    || (key.code == KeyCode::Up
+                        && (key.modifiers.contains(KeyModifiers::SHIFT)
+                            || key.modifiers.contains(KeyModifiers::CONTROL)))
+                    || (key.code == KeyCode::Char('u')
+                        && key.modifiers.contains(KeyModifiers::CONTROL));
                 if is_scroll_up {
                     app.follow = false;
                     app.scroll = app.scroll.saturating_sub(15);
@@ -655,8 +771,11 @@ where
                 }
                 // Page down / scroll down: PgDn, Shift+Down, Ctrl+Down, Ctrl-D
                 let is_scroll_down = key.code == KeyCode::PageDown
-                    || (key.code == KeyCode::Down && (key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::CONTROL)))
-                    || (key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL));
+                    || (key.code == KeyCode::Down
+                        && (key.modifiers.contains(KeyModifiers::SHIFT)
+                            || key.modifiers.contains(KeyModifiers::CONTROL)))
+                    || (key.code == KeyCode::Char('d')
+                        && key.modifiers.contains(KeyModifiers::CONTROL));
                 if is_scroll_down {
                     app.scroll = app.scroll.saturating_add(15).min(MAX_SCROLL);
                     continue;
@@ -838,23 +957,26 @@ mod tests {
     #[test]
     fn test_handle_command_session_alias() {
         let (meta_tx, _meta_rx) = unbounded_channel();
+        let (model_tx, _model_rx) = unbounded_channel::<Option<String>>();
         let mut app = App {
             messages: Vec::new(),
             input: TextArea::default(),
             scroll: 0,
             follow: true,
             streaming: false,
-            spinner_idx: 0,
             spinner_tick: 0,
             probing_ctx: false,
+            model: Some("test-model".to_string()),
+            probing_model: false,
             status: String::new(),
             config: Config {
                 base_url: "http://localhost:11434/v1".to_string(),
                 api_key: String::new(),
-                model: "test-model".to_string(),
+                model: Some("test-model".to_string()),
             },
             stats: SysStats::new(),
             rx: None,
+            stream_task: None,
             pending: String::new(),
             temperature_override: None,
             ctx_window: None,
@@ -867,6 +989,8 @@ mod tests {
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: None,
+            model_tx,
+            model_rx: None,
         };
 
         // Test /sessions opens picker

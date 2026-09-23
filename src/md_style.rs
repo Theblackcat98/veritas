@@ -212,7 +212,10 @@ fn style_line(line: &Line<'_>, width: usize) -> Line<'static> {
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
 
     // Check if this line looks like a horizontal rule
-    let is_hr = text.trim().chars().all(|c| c == '-' || c == '_' || c == '*')
+    let is_hr = text
+        .trim()
+        .chars()
+        .all(|c| c == '-' || c == '_' || c == '*')
         && text.trim().len() >= 3;
 
     // Check if this line is a code block fence
@@ -292,7 +295,11 @@ mod tests {
             .iter()
             .map(|sp| sp.content.as_ref())
             .collect();
-        assert_eq!(hr_str.chars().count(), 40, "HR must be 40 chars wide in 50-col view");
+        assert_eq!(
+            hr_str.chars().count(),
+            40,
+            "HR must be 40 chars wide in 50-col view"
+        );
     }
 
     #[test]

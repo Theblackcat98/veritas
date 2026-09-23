@@ -377,13 +377,22 @@ fn draw_spinner(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         f.render_widget(Paragraph::new(Line::from(spans)), parts[2]);
         return;
     }
+    // Failures render in the error token so the status line isn't uniformly
+    // faint; everything else keeps the quiet default (D021).
+    let style = if is_error_status(&app.status) {
+        Theme::error()
+    } else {
+        Theme::status()
+    };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            app.status.clone(),
-            Theme::status(),
-        ))),
+        Paragraph::new(Line::from(Span::styled(app.status.clone(), style))),
         area,
     );
+}
+
+/// Error-ish status strings → `Theme::error()`; everything else default.
+fn is_error_status(s: &str) -> bool {
+    s.starts_with("Error") || s.contains("failed") || s.contains("Failed")
 }
 
 fn draw_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -397,20 +406,51 @@ fn draw_input(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // Fixed layout — every widget keeps its slot whether or not its data
-    // source is available; unavailable sources render n/a in place (rule 9).
+    // Always-on widgets keep fixed slots; VRAM + GPU sparkline exist only
+    // when amdgpu reports data — otherwise those widgets are hidden, never
+    // faked (ROADMAP Phase 1, rule 9).
+    let has_gpu = app.stats.vram.is_some();
+    let mut cons: Vec<Constraint> = vec![
+        Constraint::Length(3), // header
+        Constraint::Length(6), // model table (4 rows + 2 borders = 6)
+        Constraint::Min(0),    // filler
+    ];
+    if has_gpu {
+        cons.push(Constraint::Length(3)); // VRAM
+    }
+    cons.push(Constraint::Length(3)); // RAM
+    if has_gpu {
+        cons.push(Constraint::Length(6)); // GPU sparkline
+    }
+    cons.push(Constraint::Length(3)); // CTX
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // header
-            Constraint::Length(6), // model table (4 rows + 2 borders = 6)
-            Constraint::Min(0),    // filler
-            Constraint::Length(3), // VRAM
-            Constraint::Length(3), // RAM
-            Constraint::Length(6), // GPU sparkline
-            Constraint::Length(3), // CTX
-        ])
+        .constraints(cons)
         .split(area);
+
+    let mut i = 0;
+    let header_area = rows[i];
+    i += 1;
+    let model_area = rows[i];
+    i += 1;
+    i += 1; // filler
+    let vram_area = if has_gpu {
+        let a = rows[i];
+        i += 1;
+        Some(a)
+    } else {
+        None
+    };
+    let ram_area = rows[i];
+    i += 1;
+    let gpu_area = if has_gpu {
+        let a = rows[i];
+        i += 1;
+        Some(a)
+    } else {
+        None
+    };
+    let ctx_area = rows[i];
 
     // Header
     f.render_widget(
@@ -420,15 +460,20 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .border_style(Theme::border())
                 .style(Theme::panel()),
         ),
-        rows[0],
+        header_area,
     );
 
-    // Model params table — live values: engine-probed ctx, /temp override or
-    // engine default (D009).
+    // Model params table — live values: engine-detected model (D030),
+    // engine-probed ctx, /temp override or engine default (D009).
     let base_short = short_base(&app.config.base_url);
     let temp_str = match app.temperature_override {
         Some(t) => t.to_string(),
         None => "engine".to_string(),
+    };
+    let model_cell = match &app.model {
+        Some(m) => Cell::from(m.as_str()),
+        None if app.probing_model => Cell::from("detecting…"),
+        None => Cell::from("n/a"),
     };
     let ctx_cell = match app.ctx_window {
         Some(n) => Cell::from(format!("{n} tok")),
@@ -448,7 +493,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
     let table = Table::new(
         vec![
-            Row::new(vec![Cell::from("model"), Cell::from(app.config.model.as_str())]),
+            Row::new(vec![Cell::from("model"), model_cell]),
             Row::new(vec![Cell::from("ctx"), ctx_cell]),
             Row::new(vec![Cell::from("temp"), Cell::from(temp_str.as_str())]),
             Row::new(vec![Cell::from("base"), Cell::from(base_short.as_str())]),
@@ -463,32 +508,27 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .style(Theme::panel())
             .title(Span::styled(" Model ", Theme::title())),
     );
-    f.render_widget(table, rows[1]);
+    f.render_widget(table, model_area);
 
-    // VRAM gauge — real when a GPU reports data, else n/a in the same slot.
-    let vram = app.stats.vram;
-    let vram_ratio = match vram {
-        Some((used, total)) if total > 0 => used as f64 / total as f64,
-        _ => 0.0,
-    };
-    let vram_title = if vram.is_some() {
-        " VRAM "
-    } else {
-        " VRAM n/a "
-    };
-    f.render_widget(
-        Gauge::default()
-            .block(
-                Block::default()
-                    .title(vram_title)
-                    .borders(Borders::ALL)
-                    .border_style(Theme::border())
-                    .style(Theme::panel()),
-            )
-            .gauge_style(Theme::gauge_vram())
-            .ratio(vram_ratio.clamp(0.0, 1.0)),
-        rows[3],
-    );
+    // VRAM gauge — rendered only when a GPU reports data (hidden otherwise).
+    if let Some(area) = vram_area {
+        if let Some((used, total)) = app.stats.vram.filter(|(_, total)| *total > 0) {
+            let ratio = used as f64 / total as f64;
+            f.render_widget(
+                Gauge::default()
+                    .block(
+                        Block::default()
+                            .title(" VRAM ")
+                            .borders(Borders::ALL)
+                            .border_style(Theme::border())
+                            .style(Theme::panel()),
+                    )
+                    .gauge_style(Theme::gauge_vram())
+                    .ratio(ratio.clamp(0.0, 1.0)),
+                area,
+            );
+        }
+    }
 
     // RAM gauge — always available via sysinfo (D008).
     let ram_ratio = if app.stats.ram_total == 0 {
@@ -507,35 +547,32 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             )
             .gauge_style(Theme::gauge_ram())
             .ratio(ram_ratio.clamp(0.0, 1.0)),
-        rows[4],
+        ram_area,
     );
 
-    // GPU sparkline — real history; blank box until data exists.
+    // GPU sparkline — real history; rendered only when a GPU reports data.
     // Ratatui's Sparkline takes data.iter().take(width), so we pass the most
     // recent window of samples so the right edge is always real-time.
-    let gpu_title = if vram.is_some() {
-        " GPU % "
-    } else {
-        " GPU % n/a "
-    };
-    let inner_width = (rows[5].width as usize).saturating_sub(2);
-    let history_slice = if app.stats.gpu_history.len() > inner_width {
-        &app.stats.gpu_history[app.stats.gpu_history.len() - inner_width..]
-    } else {
-        &app.stats.gpu_history[..]
-    };
-    let spark = Sparkline::default()
-        .block(
-            Block::default()
-                .title(gpu_title)
-                .borders(Borders::ALL)
-                .border_style(Theme::border())
-                .style(Theme::panel()),
-        )
-        .style(Theme::gauge_gpu())
-        .data(history_slice)
-        .max(100);
-    f.render_widget(spark, rows[5]);
+    if let Some(area) = gpu_area {
+        let inner_width = (area.width as usize).saturating_sub(2);
+        let history_slice = if app.stats.gpu_history.len() > inner_width {
+            &app.stats.gpu_history[app.stats.gpu_history.len() - inner_width..]
+        } else {
+            &app.stats.gpu_history[..]
+        };
+        let spark = Sparkline::default()
+            .block(
+                Block::default()
+                    .title(" GPU % ")
+                    .borders(Borders::ALL)
+                    .border_style(Theme::border())
+                    .style(Theme::panel()),
+            )
+            .style(Theme::gauge_gpu())
+            .data(history_slice)
+            .max(100);
+        f.render_widget(spark, area);
+    }
 
     // CTX usage — ratio gauge when the window is probed; otherwise an
     // empty gauge with an n/a label, never a fake ratio (D009 / rule 9).
@@ -562,16 +599,19 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             )
             .gauge_style(Theme::gauge_ctx(ctx_ratio))
             .ratio(ctx_ratio),
-        rows[6],
+        ctx_area,
     );
 }
 
+/// Strip the scheme and keep the tail — char-boundary safe, never panics
+/// on non-ASCII base URLs.
 fn short_base(base: &str) -> String {
     let s = base
         .trim_start_matches("http://")
         .trim_start_matches("https://");
-    if s.len() > 18 {
-        format!("…{}", &s[s.len() - 17..])
+    if s.chars().count() > 18 {
+        let tail: String = s.chars().rev().take(17).collect();
+        format!("…{}", tail.chars().rev().collect::<String>())
     } else {
         s.to_string()
     }
@@ -590,7 +630,7 @@ mod tests {
         App::new(Config {
             base_url: "http://127.0.0.1:9/v1".to_string(),
             api_key: String::new(),
-            model: "test".to_string(),
+            model: Some("test".to_string()),
         })
     }
 
@@ -804,18 +844,36 @@ mod tests {
         app.ctx_window = Some(8192);
         app.stats.ctx_used = 1024;
         let text = render(&mut app, 80, 24);
-        assert!(text.contains("Veritas Agent"), "header visible in 80x24:\n{text}");
-        assert!(text.contains("Model"), "model table visible in 80x24:\n{text}");
+        assert!(
+            text.contains("Veritas Agent"),
+            "header visible in 80x24:\n{text}"
+        );
+        assert!(
+            text.contains("Model"),
+            "model table visible in 80x24:\n{text}"
+        );
         assert!(text.contains("RAM"), "RAM gauge visible in 80x24:\n{text}");
         assert!(text.contains("CTX"), "CTX gauge visible in 80x24:\n{text}");
 
         // Now test help overlay in 80x24
         app.help_open = true;
         let help_view = render(&mut app, 80, 24);
-        assert!(help_view.contains("KEYBOARD"), "keyboard section visible in 80x24:\n{help_view}");
-        assert!(help_view.contains("COMMANDS"), "commands section visible in 80x24:\n{help_view}");
-        assert!(help_view.contains("/temp <0.0-2.0>"), "last command visible in 80x24:\n{help_view}");
-        assert!(help_view.contains("Esc close"), "footer visible in 80x24:\n{help_view}");
+        assert!(
+            help_view.contains("KEYBOARD"),
+            "keyboard section visible in 80x24:\n{help_view}"
+        );
+        assert!(
+            help_view.contains("COMMANDS"),
+            "commands section visible in 80x24:\n{help_view}"
+        );
+        assert!(
+            help_view.contains("/temp <0.0-2.0>"),
+            "last command visible in 80x24:\n{help_view}"
+        );
+        assert!(
+            help_view.contains("Esc close"),
+            "footer visible in 80x24:\n{help_view}"
+        );
     }
 
     #[tokio::test]
@@ -871,5 +929,30 @@ mod tests {
             text_resolved.contains("n/a"),
             "model table must show n/a when not probing and ctx unknown:\n{text_resolved}"
         );
+    }
+
+    #[test]
+    fn short_base_is_char_boundary_safe() {
+        // Non-ASCII must not panic and must keep the tail (regression: byte
+        // slicing panicked mid-codepoint).
+        let long = format!("http://{}", "é".repeat(30));
+        let out = short_base(&long);
+        assert!(out.starts_with('…'));
+        assert_eq!(out.chars().count(), 18, "ellipsis + 17 tail chars");
+
+        assert_eq!(
+            short_base("http://localhost:11434/v1"),
+            "localhost:11434/v1"
+        );
+        assert_eq!(short_base("https://a.b/v1"), "a.b/v1");
+    }
+
+    #[test]
+    fn error_statuses_get_error_style() {
+        assert!(is_error_status("Error: HTTP 500"));
+        assert!(is_error_status("Session save failed: disk full"));
+        assert!(is_error_status("Failed to copy to clipboard."));
+        assert!(!is_error_status("Ready — Enter send"));
+        assert!(!is_error_status("Saved sess-1 · 2 msgs"));
     }
 }

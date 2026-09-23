@@ -28,6 +28,10 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - Real model params in the sidebar table — temperature is engine-owned
   (omitted from requests unless `/temp` overrides), ctx window probed from
   the engine ✅
+- Model id has no hardcoded default: auto-detected from the engine's
+  `GET /models` at startup (re-detect via bare `/model`);
+  `OPENAI_MODEL` overrides when set; sidebar shows `n/a` when the server
+  is unreachable (D030) ✅
 - `/help`, `/model <id>`, `/temp <f>` slash commands with status-line
   feedback ✅
 - CTX gauge color shift (green → yellow → red) as the window fills ✅
@@ -76,7 +80,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 | Tool calling / agents / MCP   | Violates charter: Veritas is a chat client      |
 | Plugin system                 | Complexity trap; themes + forks cover it        |
 | Tabs / multi-session UI       | One conversation at a time is the identity      |
-| Full markdown/HTML rendering  | Terminal-native means light markup only         |
+| ~~Full markdown rendering~~ / raw HTML | Full markdown superseded by D015; raw HTML still rejected |
 | 50-key config file            | Env vars now; one TOML only if a decision demands |
 
 ## Widget inventory
@@ -90,6 +94,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 | Table (ratatui)              | Model params                | ✅ real params (P1)           |
 | Scrollbar (ratatui)          | Transcript position         | ✅                            |
 | Clear widget (ratatui)       | Overlay backgrounds         | ✅ real (P2 picker, help)     |
+| List (ratatui)               | Session picker rows         | ✅ real (P2, D013)            |
 | Spinners (tui-spinner)       | Thinking & status activity  | ✅ real (D029)                |
 
 New widgets need a DECISIONS entry (see AGENTS.md rule 8).
@@ -101,8 +106,10 @@ New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 | Enter / Shift+Enter          | Send / newline             | ✅     |
 | Esc                          | Cancel stream              | ✅     |
 | Ctrl-C / Ctrl-Q              | Quit                       | ✅     |
-| PgUp/PgDn, Ctrl-U/D, wheel   | Scroll                     | ✅     |
+| PgUp/PgDn, Ctrl-U/D          | Scroll                     | ✅     |
+| Shift+↑/↓, Ctrl+↑/↓, wheel   | Scroll (alternate)         | ✅     |
 | `/help`                      | Help overlay modal         | ✅     |
 | `/model`, `/temp`            | Set params                 | ✅     |
 | Ctrl-S                       | Sessions picker (save+list)| ✅ P2  |
+| Ctrl-Y                       | Copy latest code block     | ✅ D026|
 

@@ -20,11 +20,7 @@ use app::Config;
 
 fn restore_terminal() {
     let _ = disable_raw_mode();
-    let _ = execute!(
-        io::stdout(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    );
+    let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
 }
 
 fn main() -> io::Result<()> {

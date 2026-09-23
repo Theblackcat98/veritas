@@ -57,6 +57,7 @@ Rules:
 | [D027](#d027--session-alias-and-phase-5-slash-command-live-preview-popup-roadmap-entry) | 2026-09-19 | accepted | Commands / Roadmap | `/session` alias for `/sessions`; Phase 5 live preview popup specification |
 | [D028](#d028--roadmap-phase-6-llamacpp-engine-launcher-from-chat-with-config-file-command-definition) | 2026-09-19 | accepted | Engine / Roadmap | Phase 6 llama.cpp engine launcher from chat with single config file |
 | [D029](#d029--animated-spinner-widgets-via-tui-spinner--ratatui-spinner) | 2026-09-20 | accepted | UI / Widgets | Animated BarSpinner & FluxSpinner via `tui-spinner` for TTFT, status, & probing |
+| [D030](#d030--no-default-model-auto-detect-from-engine-models) | 2026-09-23 | accepted (qualifies [D001](#d001--configuration-via-environment-variables-only)) | Config / Provider | No hardcoded default model; auto-detect via `GET /models`; `n/a` fallback |
 
 ---
 
@@ -451,3 +452,16 @@ Rules:
   - Drive all spinner animations via an application-owned `app.spinner_tick: u64` in the synchronous TUI event loop (`D002`).
   - Colors are routed through `Theme::activity_color()` and `Theme::panel_color()` in `src/theme.rs` (Rule 4).
 - **Consequences:** Immediate visual feedback during prompt ingestion and model probing; preserves text shimmer sweep without visual artifacts; strictly maintains the Quiet Mission Control visual identity and synchronous event loop.
+
+## D030 — No default model; auto-detect from engine models
+- **Date:** 2026-09-23
+- **Status:** accepted (qualifies D001's `OPENAI_MODEL`)
+- **Context:**
+  1. The code hardcoded `llama3.1` as the default model while README claimed `jan-nano` — two sources of truth, neither guaranteed to exist on the user's engine.
+  2. The charter is local-first: the engine that is actually running knows which models it has; the client should ask, not guess.
+  3. A wrong default produces a confusing HTTP 404/`model not found` on first send instead of an honest `n/a`.
+- **Decision:**
+  - No hardcoded default model. `OPENAI_MODEL`, when set, is the explicit override and wins.
+  - Otherwise probe `GET {OPENAI_BASE_URL}/models` at startup (and on bare `/model`) and use the first returned model id.
+  - Sidebar shows `n/a` when no model is known; sending with no model re-probes once and otherwise refuses with a status-line hint instead of firing a doomed request.
+- **Consequences:** First-run experience reflects the real engine; offline servers degrade to `n/a` rather than errors. Adds one lightweight probe request. README/config docs must say "auto-detected", never a concrete default id.

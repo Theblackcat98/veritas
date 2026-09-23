@@ -146,6 +146,10 @@ pub fn list(dir: &Path) -> Vec<SessionEntry> {
         let Ok(file) = serde_json::from_slice::<SessionFile>(&bytes) else {
             continue;
         };
+        // Unknown formats are skipped like corrupt files — never guessed at.
+        if file.version != FORMAT_VERSION {
+            continue;
+        }
         let Some(id) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
@@ -165,6 +169,15 @@ pub fn load(dir: &Path, id: &str) -> io::Result<(Option<String>, u64, Vec<ChatMe
     let bytes = fs::read(dir.join(format!("{id}.json")))?;
     let file: SessionFile = serde_json::from_slice(&bytes)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    if file.version != FORMAT_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "unsupported session format version {} (expected {FORMAT_VERSION})",
+                file.version
+            ),
+        ));
+    }
     Ok((file.title, file.created_at, to_chat(&file.messages)))
 }
 
@@ -232,7 +245,10 @@ mod tests {
     #[test]
     fn roundtrip_save_load_preserves_messages() {
         let dir = tmp_dir("roundtrip");
-        let messages = vec![msg(Role::User, "hello there"), msg(Role::Agent, "greetings")];
+        let messages = vec![
+            msg(Role::User, "hello there"),
+            msg(Role::Agent, "greetings"),
+        ];
         save(&dir, "sess-1", Some("hello there"), 42, &messages).expect("save");
         let (title, created, loaded) = load(&dir, "sess-1").expect("load");
         assert_eq!(title.as_deref(), Some("hello there"));
@@ -253,9 +269,19 @@ mod tests {
         save(&dir, "sess-2", Some("new"), 2, &[msg(Role::User, "b")]).expect("resave 2");
         fs::write(dir.join("junk.json"), b"{not json").expect("junk");
         fs::write(dir.join("sess-1.tmp"), b"partial").expect("tmp");
+        // Unsupported format version must be skipped like corrupt files.
+        fs::write(
+            dir.join("sess-99.json"),
+            br#"{"version":99,"title":"future","created_at":1,"updated_at":99,"messages":[]}"#,
+        )
+        .expect("future");
 
         let entries = list(&dir);
-        assert_eq!(entries.len(), 2, "corrupt + non-json files must be skipped");
+        assert_eq!(
+            entries.len(),
+            2,
+            "corrupt + non-json + wrong-version files must be skipped"
+        );
         assert_eq!(entries[0].id, "sess-2", "newest first");
         assert_eq!(entries[0].msg_count, 1);
         fs::remove_dir_all(&dir).ok();

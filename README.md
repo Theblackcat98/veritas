@@ -13,7 +13,7 @@ endpoint — Ollama, llama.cpp server, OpenAI, OpenRouter, vLLM, etc.
   bar for pre-token thinking, and shimmer status line paired with live spinner
 - Full markdown rendering for agent replies — headings, lists, tables,
   links, blockquotes, and syntax-highlighted code blocks
-- PgUp/PgDn, Ctrl-U/Ctrl-D, and mouse-wheel scrolling with follow-tail
+- PgUp/PgDn and Ctrl-U/Ctrl-D scrolling with follow-tail
 - Shift+Enter for newlines, `/clear` to reset the conversation
 - Sessions: auto-saved JSON transcripts, Ctrl-S picker overlay, markdown
   export
@@ -30,7 +30,7 @@ Everything comes from environment variables:
 |---|---|---|
 | `OPENAI_BASE_URL` | `http://localhost:11434/v1` | API base (Ollama default shown) |
 | `OPENAI_API_KEY` | *(empty)* | Bearer token; omitted from requests when unset |
-| `OPENAI_MODEL` | `jan-nano` | Model id |
+| `OPENAI_MODEL` | *(unset — auto-detected)* | Model id; probed from the engine's `GET /models` when unset (D030) |
 | `VERITAS_THEME` | `default` | Theme preset: `default`, `amber`, `green`, or `monochrome` |
 
 Engine-owned parameters are not client config: requests omit `temperature`
@@ -59,7 +59,7 @@ Type in the input box:
 | `/copy [n]` | Copy latest code block (or block *n*) to system clipboard |
 | `/sessions`, `/session` | Open the session picker (same as Ctrl-S) |
 | `/export <file>` | Write the transcript as markdown |
-| `/model <id>` | Switch model (takes effect on next send; re-probes ctx window) |
+| `/model <id>` | Switch model (takes effect on next send; re-probes ctx window); bare `/model` re-detects from the engine (D030) |
 | `/temp <0.0-2.0>` | Override sampling temperature — bare `/temp` shows the effective setting |
 | `/clear` | Reset the conversation (next save starts a new session) |
 
@@ -75,7 +75,6 @@ Enter loads, Esc cancels.
 
 ```sh
 export OPENAI_BASE_URL="http://localhost:11434/v1"
-export OPENAI_MODEL="jan-nano"
 cargo run --release
 ```
 
@@ -85,5 +84,4 @@ cargo run --release
 - `Esc` — stop streaming / close overlays · `Ctrl-S` — session picker · `Ctrl-C` / `Ctrl-Q` — quit
 - `Ctrl-Y` — copy latest code block to system clipboard (OSC 52 + desktop tool)
 - `/help` — show help overlay; `?` is entered as chat text
-- `PgUp`/`PgDn` or `Shift+Up`/`Down` or `Ctrl+Up`/`Down` or `Ctrl-U`/`Ctrl-D` or mouse wheel — scroll
-- In the picker: `↑`/`↓` select · `PgUp`/`PgDn` jump · `Enter` load · `Esc` cancel
+- `PgUp`/`PgDn` or `Ctrl-U`/`Ctrl-D` — scroll

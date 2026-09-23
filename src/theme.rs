@@ -1,5 +1,5 @@
-use std::sync::OnceLock;
 use ratatui::style::{Color, Modifier, Style};
+use std::sync::OnceLock;
 
 /// Theme presets selectable via the `VERITAS_THEME` environment variable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

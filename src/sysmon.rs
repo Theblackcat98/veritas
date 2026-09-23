@@ -5,7 +5,7 @@ use sysinfo::System;
 
 /// Real telemetry for the sidebar. Raw counters, not ratios, so titles can
 /// show true numbers (see D010). `vram = None` means "no usable GPU" and
-/// the VRAM/GPU widgets show n/a in place (rule 9).
+/// the VRAM/GPU widgets are hidden entirely (rule 9 — never faked).
 #[derive(Debug, Clone)]
 pub struct SysStats {
     pub ram_used: u64,            // bytes
