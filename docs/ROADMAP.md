@@ -90,6 +90,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 | Table (ratatui)              | Model params                | ✅ real params (P1)           |
 | Scrollbar (ratatui)          | Transcript position         | ✅                            |
 | Clear widget (ratatui)       | Overlay backgrounds         | ✅ real (P2 picker, help)     |
+| Spinners (tui-spinner)       | Thinking & status activity  | ✅ real (D029)                |
 
 New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 

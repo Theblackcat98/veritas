@@ -24,6 +24,42 @@ Rules:
 
 ---
 
+## Decision Index & Cross-Reference Map
+
+| Decision | Date | Status | Area | Summary |
+|---|---|---|---|---|
+| [D001](#d001--configuration-via-environment-variables-only) | 2026-09-17 | accepted (qualified by [D028](#d028--roadmap-phase-6-llamacpp-engine-launcher-from-chat-with-config-file-command-definition)) | Config | Env-var only configuration (`OPENAI_*`); config file requires decision |
+| [D002](#d002--sync-tui-loop--tokio-runtime--unbounded-mpsc) | 2026-09-17 | accepted | Architecture | Sync event loop in `app::run`, tokio HTTP streaming, unbounded mpsc channel |
+| [D003](#d003--single-file-theme-no-hardcoded-colors-in-uirs) | 2026-09-17 | accepted | UI / Theme | Single-file theme (`src/theme.rs`); no hardcoded colors in `ui.rs` |
+| [D004](#d004--hand-rolled-sse-parsing-over-reqwest-bytes_stream) | 2026-09-17 | accepted | Provider | Hand-rolled SSE parser over `bytes_stream` with 1 MiB growth guard |
+| [D005](#d005--sidebar-telemetry-mocked-at-phase-0) | 2026-09-17 | **superseded by [D010](#d010--telemetry-sampled-inline-in-the-tui-event-loop)** | Telemetry | Initial Phase 0 mock telemetry waveforms |
+| [D006](#d006--lightweight-markdown-rendering-for-agent-messages) | 2026-09-17 | **superseded by [D015](#d015--markdown-rendering-via-tui-markdown-supersedes-d006s-library-tbd)** | Markdown | Initial lightweight markdown intent (library deferred) |
+| [D007](#d007--u16-scroll-clamp-ratatui-029-overflow-guard) | 2026-09-17 | accepted | UI / Scroll | Clamp Paragraph scroll to prevent u16 overflow near `u16::MAX` |
+| [D008](#d008--ram-telemetry-via-the-sysinfo-crate) | 2026-09-17 | accepted | Telemetry | System RAM telemetry via `sysinfo` crate |
+| [D009](#d009--all-model-info-is-gathered-from-the-inference-engine) | 2026-09-18 | accepted | Telemetry / Provider | Model info & context probed from engine; `/temp` override; never fake data |
+| [D010](#d010--telemetry-sampled-inline-in-the-tui-event-loop) | 2026-09-17 | accepted (supersedes [D005](#d005--sidebar-telemetry-mocked-at-phase-0)) | Telemetry | Inline telemetry sampling every 500 ms; raw counters in `SysStats` |
+| [D011](#d011--follow-tail-via-pre-wrapped-row-counts-textwrap-for-wrapping) | 2026-09-18 | accepted | UI / Scroll | Follow-tail via pre-wrapped row counts using `textwrap` |
+| [D012](#d012--sessions-json-files-std-only-time-auto-save-on-stream-end) | 2026-09-18 | accepted | Sessions | Transcripts stored as JSON in XDG data dir; auto-save on stream end |
+| [D013](#d013--session-picker-centered-clearlist-modal-ctrl-s-or-sessions) | 2026-09-18 | accepted | Sessions / UI | Centered 60%×60% modal picker with `Clear` punch-through; Ctrl-S or `/sessions` |
+| [D014](#d014--export-file-writes-hand-rolled-markdown) | 2026-09-18 | accepted | Sessions | `/export <file>` exports verbatim transcript sections as markdown |
+| [D015](#d015--markdown-rendering-via-tui-markdown-supersedes-d006s-library-tbd) | 2026-09-17 | accepted (supersedes [D006](#d006--lightweight-markdown-rendering-for-agent-messages)) | Markdown | Full markdown rendering via `tui-markdown` crate with syntax highlighting |
+| [D016](#d016--ratatui-030-upgrade-and-ratatui-textarea-swap) | 2026-09-17 | accepted | UI / Deps | Ratatui 0.30, crossterm 0.29, and `ratatui-textarea` 0.9 upgrade |
+| [D017](#d017--streaming-shimmer-via-tui-shimmer) | 2026-09-17 | accepted | UI / Deps | Status line streaming shimmer sweep using `tui-shimmer` |
+| [D018](#d018--scroll-behavior-fixes-and-help-overlay) | 2026-09-18 | accepted (partially qualified by [D024](#d024--literal-question-marks-take-precedence-over-the-help-command-shortcut)) | UI / Help | Scroll boundary clamping; modal `/help` overlay |
+| [D019](#d019--enhanced-markdown-styling) | 2026-09-18 | accepted | Markdown / Theme | Heading levels, tables, styled fences, and HR rules in `VeritasMd` |
+| [D020](#d020--session-picker-styling-consistency) | 2026-09-18 | **superseded by [D022](#d022--shared-semantic-modal-styling-supersedes-picker-specific-styling)** | UI / Theme | Session picker styling matching help overlay via markdown tokens |
+| [D021](#d021--quiet-mission-control-visual-identity) | 2026-09-18 | accepted | Design System | Quiet Mission Control visual identity, semantic roles, `docs/STYLE.md` |
+| [D022](#d022--shared-semantic-modal-styling-supersedes-picker-specific-styling) | 2026-09-18 | accepted (supersedes [D020](#d020--session-picker-styling-consistency)) | UI / Theme | Shared semantic modal styling separating application chrome from markdown |
+| [D023](#d023--preserve-literal-shifted-question-marks-and-anchor-manual-scroll) | 2026-09-18 | **superseded by [D024](#d024--literal-question-marks-take-precedence-over-the-help-command-shortcut)** | Input / Scroll | Anchored manual scroll offset and conditional `?` shortcut |
+| [D024](#d024--literal-question-marks-take-precedence-over-the-help-command-shortcut) | 2026-09-18 | accepted (supersedes [D023](#d023--preserve-literal-shifted-question-marks-and-anchor-manual-scroll)) | Input / Help | Literal question mark takes precedence in chat; remove global `?` key shortcut |
+| [D025](#d025--standard-8024-terminal-geometry-stream-options-llamacpp-probing-and-terminal-panic-safety) | 2026-09-19 | accepted | Terminal / Provider | 80×24 layout scaling, `include_usage`, llama.cpp `/props` probe, panic hook, `--version` |
+| [D026](#d026--theme-presets-via-veritas_theme-real-time-gpu-history-slice-word-wrapping-boundaries-and-code-block-clipboard-copy) | 2026-09-19 | accepted | UI / Features | Theme presets (`VERITAS_THEME`), word-boundary wrapping, GPU slice, OSC 52 copy |
+| [D027](#d027--session-alias-and-phase-5-slash-command-live-preview-popup-roadmap-entry) | 2026-09-19 | accepted | Commands / Roadmap | `/session` alias for `/sessions`; Phase 5 live preview popup specification |
+| [D028](#d028--roadmap-phase-6-llamacpp-engine-launcher-from-chat-with-config-file-command-definition) | 2026-09-19 | accepted | Engine / Roadmap | Phase 6 llama.cpp engine launcher from chat with single config file |
+| [D029](#d029--animated-spinner-widgets-via-tui-spinner--ratatui-spinner) | 2026-09-20 | accepted | UI / Widgets | Animated BarSpinner & FluxSpinner via `tui-spinner` for TTFT, status, & probing |
+
+---
+
 ## D001 — Configuration via environment variables only
 - **Date:** 2026-09-17
 - **Status:** accepted
@@ -31,7 +67,7 @@ Rules:
 - **Decision:** `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL` env vars;
   no config file.
 - **Consequences:** No config parsing code; profile switching = shell exports.
-  A TOML/JSON config requires a new decision.
+  A TOML/JSON config requires a new decision. *(Note: Qualified by D028 on 2026-09-19, which approves an optional single config file specifically defining the host run command for the Phase 6 llama.cpp engine launcher.)*
 
 ## D002 — Sync TUI loop + tokio runtime + unbounded mpsc
 - **Date:** 2026-09-17
@@ -64,16 +100,16 @@ Rules:
 
 ## D005 — Sidebar telemetry mocked at Phase 0
 - **Date:** 2026-09-17
-- **Status:** accepted
+- **Status:** superseded by D010
 - **Context:** Layout and widgets mattered before data sources existed.
 - **Decision:** `SysStats` generates fake waveforms; real NVML/sysinfo wiring
   is Phase 1.
 - **Consequences:** Widget-facing data shapes must not change when real data
-  lands (ratios 0..1, history `Vec<u64>`).
+  lands (ratios 0..1, history `Vec<u64>`). *(Note: Superseded by D010 on 2026-09-17, which replaced the mock waveform ratio lock with real inline sampling and raw counter representations in `SysStats`.)*
 
 ## D006 — Lightweight markdown rendering for agent messages
 - **Date:** 2026-09-17
-- **Status:** accepted
+- **Status:** superseded by D015
 - **Context:** Scannable, readable model output matters in a chat client
   (ROADMAP Phase 3).
 - **Decision:** Render agent message content as lightweight markdown: fenced
@@ -81,7 +117,7 @@ Rules:
   The rendering library is a separate choice and gets its own entry before
   implementation (rule 3).
 - **Consequences:** Plain-text rendering stays until the library decision
-  lands; the full-markdown rejection in ROADMAP applies.
+  lands; the full-markdown rejection in ROADMAP applies. *(Note: Superseded by D015 on 2026-09-17, which adopted full CommonMark rendering and syntax highlighting via `tui-markdown`.)*
 
 ## D007 — u16 scroll clamp (ratatui 0.29 overflow guard)
 - **Date:** 2026-09-17
@@ -205,6 +241,7 @@ Rules:
 - **Consequences:** No dependency. Content is not escaped — a message
   containing `##` renders as a heading in downstream viewers; accepted
   because the export is a faithful transcript, not sanitized prose.
+
 ## D015 — Markdown rendering via `tui-markdown` (supersedes D006's "library TBD")
 - **Date:** 2026-09-17
 - **Status:** accepted
@@ -261,7 +298,7 @@ Rules:
   command and `?` key. Shows all keybindings and commands with theme colors.
 - **Consequences:** No new dependencies. Scroll behavior now respects content boundaries.
   Help overlay uses existing widgets and follows established modal pattern. UX improved
-  without architectural changes.
+  without architectural changes. *(Note: The `?` shortcut trigger was later removed by D024 so literal question marks can be typed in chat; `/help` remains the dedicated help trigger.)*
 
 ## D019 — Enhanced markdown styling
 - **Date:** 2026-09-18
@@ -282,7 +319,7 @@ Rules:
 
 ## D020 — Session picker styling consistency
 - **Date:** 2026-09-18
-- **Status:** accepted
+- **Status:** superseded by D022
 - **Context:** User requested session picker styling to match the new help overlay
   styling for visual consistency across modals.
 - **Decision:** Apply similar styling pattern to session picker: use bullet points (●)
@@ -290,7 +327,7 @@ Rules:
   (message counts, ages), italic style (md_italic) for empty state hint. Add black
   background to block for consistency with help overlay.
 - **Consequences:** No new dependencies. Session picker now visually matches help overlay
-  using existing theme tokens. Improved readability and UI consistency.
+  using existing theme tokens. Improved readability and UI consistency. *(Note: Superseded by D022 on 2026-09-18, which decoupled chrome and session metadata from markdown presentation and adopted the shared Quiet Mission Control semantic modal design language.)*
 
 
 ## D021 — Quiet Mission Control visual identity
@@ -303,14 +340,14 @@ Rules:
 
 ## D022 — Shared semantic modal styling supersedes picker-specific styling
 - **Date:** 2026-09-18
-- **Status:** accepted
+- **Status:** accepted (supersedes D020)
 - **Context:** D020 made the session picker visually match the help overlay by reusing markdown heading/code styles and a repeated bullet marker. The Quiet Mission Control direction requires modal controls, session metadata, and markdown content to have separate semantic roles.
 - **Decision:** Supersede D020 with a shared modal frame using `modal_surface`, `border_focus`, `title`, `section_title`, `key_hint`, `command_hint`, `muted`, `faint`, and `selected_row` roles. Session rows use a single `›` selection marker, readable titles, subdued metadata, and a dedicated footer; help uses distinct keyboard and command sections. Markdown uses the shared `faint` role for dim content instead of a picker-specific alias.
 - **Consequences:** Modal styling is consistent without coupling application chrome to markdown presentation. D020 remains immutable history but no longer describes the current session-picker implementation. No new dependencies or widgets are required.
 
 ## D023 — Preserve literal shifted question marks and anchor manual scroll
 - **Date:** 2026-09-18
-- **Status:** accepted
+- **Status:** superseded by D024
 - **Context:** Loading a long session displayed the follow tail, but the first
   wheel-up event used a stale zero scroll offset and jumped to the top. Also,
   the global `?` shortcut intercepted the shifted `/` users use to type a
@@ -322,11 +359,11 @@ Rules:
 - **Consequences:** Manual scrolling has a continuous first step after loading
   or following a response. Help remains available through `/help` and through
   terminals that emit an unmodified `?` shortcut event; literal shifted `?`
-  input is no longer intercepted.
+  input is no longer intercepted. *(Note: The manual scroll offset fix was retained, while the global `?` shortcut was superseded by D024 on 2026-09-18 in favor of unambiguous literal chat input.)*
 
 ## D024 — Literal question marks take precedence over the help command shortcut
 - **Date:** 2026-09-18
-- **Status:** accepted; supersedes D023
+- **Status:** accepted (supersedes D023)
 - **Context:** Printable keyboard input does not reliably preserve whether a
   `?` came from `Shift+/`; many terminals deliver both forms as the same
   character event. A global `?` handler therefore intercepts legitimate chat
@@ -396,6 +433,21 @@ Rules:
   - Allow an optional single configuration file (e.g. `~/.config/veritas/config.toml` following XDG conventions) specifically defining the `run` command / command-line arguments to launch the local `llama.cpp` server, without turning Veritas into a config-heavy application.
   - Manage process lifecycle (spawn child process, monitor readiness/health, clean up child on exit).
 - **Consequences:** Expands Veritas configuration scope from env-var only to allowing an optional single config file for host process execution commands. Keeps the core chat client identity while removing friction for local LLM hackers.
-
-
-
+ 
+ 
+## D029 — Animated spinner widgets via tui-spinner / ratatui-spinner
+- **Date:** 2026-09-20
+- **Status:** accepted
+- **Context:**
+  1. Heavy local LLMs take seconds to evaluate large prompts before the first token arrives (TTFT). Veritas previously rendered a static `…` under `◆ Agent`, making the transcript look unresponsive.
+  2. The status bar rendered a hand-rolled static 10-character braille array (`SPINNER_FRAMES`) inside the `tui-shimmer` sweep.
+  3. Probing model context length at startup or on `/model` displayed a cold `n/a` before resolving.
+  4. Ratatui built-in widgets do not include animated multi-frame braille/arc spinners; the official Ratatui ecosystem project `ratatui/ratatui-spinner` (published as `tui-spinner` 0.4.22) provides stateless widgets designed for Ratatui 0.30.
+- **Decision:**
+  - Add `tui-spinner = "0.4.22"` dependency (Rule 2 & 8).
+  - In `draw_transcript`, render a horizontal `BarSpinner` (`BarMotion::Bounce`, `BarStyle::Braille`, width bounded to 16 cols) labeled `"Thinking  "` in `Theme::spinner()` while `app.streaming && app.pending.is_empty()`. Once tokens arrive, this cleanly transitions to streaming markdown ending in cursor `▊`.
+  - In `draw_spinner` (status line), preserve the `tui-shimmer` sweep on `"Thinking… streaming (Esc to stop)"` while rendering a companion `FluxSpinner` (`FluxFrames::BRAILLE`) with `Theme::activity_color()`.
+  - Add `app.probing_ctx` and render an animated `FluxSpinner` + `" probing…"` in the sidebar Model table `ctx` cell while engine probing is in flight.
+  - Drive all spinner animations via an application-owned `app.spinner_tick: u64` in the synchronous TUI event loop (`D002`).
+  - Colors are routed through `Theme::activity_color()` and `Theme::panel_color()` in `src/theme.rs` (Rule 4).
+- **Consequences:** Immediate visual feedback during prompt ingestion and model probing; preserves text shimmer sweep without visual artifacts; strictly maintains the Quiet Mission Control visual identity and synchronous event loop.

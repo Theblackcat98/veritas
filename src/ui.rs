@@ -2,12 +2,13 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Scrollbar,
+    Block, Borders, Cell, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Sparkline, Table,
 };
 use ratatui::Frame;
+use tui_spinner::{BarMotion, BarSpinner, BarStyle, FluxFrames, FluxSpinner};
 
-use crate::app::{App, Role, MAX_SCROLL, SPINNER_FRAMES};
+use crate::app::{App, Role, MAX_SCROLL};
 use crate::md_style;
 use crate::session;
 use crate::theme::Theme;
@@ -276,7 +277,23 @@ fn draw_transcript(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             Span::styled("─".repeat(8), Theme::separator()),
         ]));
         if app.pending.is_empty() {
-            rows.push(Line::from(Span::styled("…", Theme::status())));
+            // Pre-token thinking phase (TTFT):
+            // Render a horizontal BarSpinner indicating active reasoning/generation.
+            let bar_width = 16.min(text_width.saturating_sub(12).max(4));
+            let bar = BarSpinner::new(app.spinner_tick)
+                .width(bar_width)
+                .bar_style(BarStyle::Braille)
+                .motion(BarMotion::Bounce)
+                .arc_color(Theme::activity_color())
+                .dim_color(Theme::panel_color());
+            let bar_lines = bar.to_lines(bar_width, 1);
+            if let Some(first) = bar_lines.into_iter().next() {
+                let mut spans = vec![Span::styled("Thinking  ", Theme::spinner())];
+                spans.extend(first.spans);
+                rows.push(Line::from(spans));
+            } else {
+                rows.push(Line::from(Span::styled("Thinking…", Theme::spinner())));
+            }
         } else {
             for chunk in app.pending.split('\n') {
                 push_wrapped(&mut rows, text_width, chunk, Theme::agent_text());
@@ -336,16 +353,28 @@ fn draw_spinner(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     if app.streaming {
         // Shimmer sweep driven from the spinner tick (D017): phase advances
         // in app::run so the animation cadence matches the rest of the UI.
-        let label = format!(
-            " {} Thinking… streaming (Esc to stop)",
-            SPINNER_FRAMES[app.spinner_idx]
-        );
+        // Status line pairs a FluxSpinner glyph with the shimmering label (D029).
+        let parts = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(1), // leading margin
+                Constraint::Length(1), // FluxSpinner glyph
+                Constraint::Min(1),    // shimmering label
+            ])
+            .split(area);
+
+        let spinner = FluxSpinner::new(app.spinner_tick)
+            .frames(FluxFrames::BRAILLE)
+            .color(Theme::activity_color());
+        f.render_widget(spinner, parts[1]);
+
+        let label = " Thinking… streaming (Esc to stop)";
         let spans = tui_shimmer::shimmer_spans_with_style_at_phase(
-            &label,
+            label,
             Theme::spinner(),
             app.shimmer_phase,
         );
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        f.render_widget(Paragraph::new(Line::from(spans)), parts[2]);
         return;
     }
     f.render_widget(
@@ -401,16 +430,28 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Some(t) => t.to_string(),
         None => "engine".to_string(),
     };
-    let ctx_str = match app.ctx_window {
-        Some(n) => format!("{n} tok"),
-        None => "n/a".to_string(),
+    let ctx_cell = match app.ctx_window {
+        Some(n) => Cell::from(format!("{n} tok")),
+        None if app.probing_ctx => {
+            let spinner_line = FluxSpinner::new(app.spinner_tick)
+                .frames(FluxFrames::BRAILLE)
+                .color(Theme::activity_color())
+                .to_lines()
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| Line::from("…"));
+            let mut spans = spinner_line.spans;
+            spans.push(Span::styled(" probing…", Theme::muted()));
+            Cell::from(Line::from(spans))
+        }
+        None => Cell::from("n/a"),
     };
     let table = Table::new(
         vec![
-            Row::new(vec!["model", app.config.model.as_str()]),
-            Row::new(vec!["ctx", ctx_str.as_str()]),
-            Row::new(vec!["temp", temp_str.as_str()]),
-            Row::new(vec!["base", base_short.as_str()]),
+            Row::new(vec![Cell::from("model"), Cell::from(app.config.model.as_str())]),
+            Row::new(vec![Cell::from("ctx"), ctx_cell]),
+            Row::new(vec![Cell::from("temp"), Cell::from(temp_str.as_str())]),
+            Row::new(vec![Cell::from("base"), Cell::from(base_short.as_str())]),
         ],
         [Constraint::Length(6), Constraint::Min(8)],
     )
@@ -775,5 +816,60 @@ mod tests {
         assert!(help_view.contains("COMMANDS"), "commands section visible in 80x24:\n{help_view}");
         assert!(help_view.contains("/temp <0.0-2.0>"), "last command visible in 80x24:\n{help_view}");
         assert!(help_view.contains("Esc close"), "footer visible in 80x24:\n{help_view}");
+    }
+
+    #[tokio::test]
+    async fn thinking_state_renders_bar_spinner_before_tokens() {
+        let mut app = test_app();
+        app.streaming = true;
+        app.pending.clear();
+        let text = render(&mut app, 80, 24);
+        assert!(
+            text.contains("Thinking"),
+            "transcript must show thinking bar before first token:\n{text}"
+        );
+        assert!(
+            text.contains("streaming (Esc to stop)"),
+            "status line must show streaming hint:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn streaming_tokens_replaces_thinking_bar_with_stream_and_cursor() {
+        let mut app = test_app();
+        app.streaming = true;
+        app.pending = "Streaming token response".to_string();
+        let text = render(&mut app, 80, 24);
+        assert!(
+            text.contains("Streaming token response"),
+            "streamed text must appear in transcript:\n{text}"
+        );
+        assert!(
+            text.contains('▊'),
+            "trailing cursor block must appear after stream:\n{text}"
+        );
+        assert!(
+            !text.contains("Thinking  "),
+            "thinking bar must be removed once tokens arrive:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_table_renders_probing_spinner_while_probing() {
+        let mut app = test_app();
+        app.ctx_window = None;
+        app.probing_ctx = true;
+        let text = render(&mut app, 80, 24);
+        assert!(
+            text.contains("probing…"),
+            "model table must show probing indicator:\n{text}"
+        );
+
+        app.probing_ctx = false;
+        let text_resolved = render(&mut app, 80, 24);
+        assert!(
+            text_resolved.contains("n/a"),
+            "model table must show n/a when not probing and ctx unknown:\n{text_resolved}"
+        );
     }
 }

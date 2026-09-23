@@ -2845,6 +2845,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tui-spinner"
+version = "0.4.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3ec08c2b6853e6bcc019289bd64a69afe1a5d9a938890ccc7fd7acda2faa59c"
+dependencies = [
+ "ratatui",
+]
+
+[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2955,6 +2964,7 @@ dependencies = [
  "tokio",
  "tui-markdown",
  "tui-shimmer",
+ "tui-spinner",
  "unicode-width",
 ]
 

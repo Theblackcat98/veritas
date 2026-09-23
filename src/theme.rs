@@ -266,6 +266,14 @@ impl Theme {
         Self::activity()
     }
 
+    pub fn activity_color() -> Color {
+        Self::palette().activity
+    }
+
+    pub fn panel_color() -> Color {
+        Self::palette().panel
+    }
+
     pub fn success() -> Style {
         Style::default().fg(Self::palette().success)
     }

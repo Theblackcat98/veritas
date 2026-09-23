@@ -65,6 +65,10 @@ pub struct App<'a> {
     pub follow: bool,
     pub streaming: bool,
     pub spinner_idx: usize,
+    /// Tick counter for tui-spinner widgets (D029).
+    pub spinner_tick: u64,
+    /// Whether the model context window is actively being probed from the engine.
+    pub probing_ctx: bool,
     pub status: String,
     pub config: Config,
     pub stats: SysStats,
@@ -98,7 +102,7 @@ impl<'a> App<'a> {
         let mut input = TextArea::default();
         input.set_placeholder_text("Type a message — Enter to send, Shift+Enter newline…");
         let (meta_tx, meta_rx) = unbounded_channel::<(String, Option<u64>)>();
-        let app = Self {
+        let mut app = Self {
             // Start empty — a seeded greeting would be sent to the model as
             // if it had said it.
             messages: Vec::new(),
@@ -107,6 +111,8 @@ impl<'a> App<'a> {
             follow: true,
             streaming: false,
             spinner_idx: 0,
+            spinner_tick: 0,
+            probing_ctx: false,
             status: "Ready — Enter send · PgUp/PgDn scroll · Ctrl-S sessions · Ctrl-C quit"
                 .to_string(),
             config,
@@ -131,7 +137,8 @@ impl<'a> App<'a> {
 
     /// Ask the inference engine for the model's context window; the answer
     /// arrives on `meta_rx` and is applied in `drain_meta` (D009).
-    fn spawn_ctx_probe(&self) {
+    fn spawn_ctx_probe(&mut self) {
+        self.probing_ctx = true;
         let base = self.config.base_url.clone();
         let model = self.config.model.clone();
         let tx = self.meta_tx.clone();
@@ -147,6 +154,7 @@ impl<'a> App<'a> {
                 // Ignore stale answers for a model we've already switched away from.
                 if model == self.config.model {
                     self.ctx_window = ctx;
+                    self.probing_ctx = false;
                 }
             }
         }
@@ -561,7 +569,8 @@ where
     loop {
         terminal.draw(|f| crate::ui::draw(f, &mut app))?;
 
-        let timeout = if app.streaming {
+        let animating = app.streaming || (app.probing_ctx && app.ctx_window.is_none());
+        let timeout = if animating {
             Duration::from_millis(8)
         } else {
             Duration::from_millis(100)
@@ -571,11 +580,14 @@ where
             sampler.sample(&mut app.stats);
             last_stats = Instant::now();
         }
-        if app.streaming && last_spinner.elapsed() >= Duration::from_millis(80) {
+        if animating && last_spinner.elapsed() >= Duration::from_millis(80) {
+            app.spinner_tick = app.spinner_tick.wrapping_add(1);
             app.spinner_idx = (app.spinner_idx + 1) % SPINNER_FRAMES.len();
             // Shimmer sweep shares the spinner tick (D017): 80 ms × ~25
             // steps ≈ a 2 s sweep, matching tui-shimmer's default cadence.
-            app.shimmer_phase = (app.shimmer_phase + 0.04) % 1.0;
+            if app.streaming {
+                app.shimmer_phase = (app.shimmer_phase + 0.04) % 1.0;
+            }
             last_spinner = Instant::now();
         }
 
@@ -833,6 +845,8 @@ mod tests {
             follow: true,
             streaming: false,
             spinner_idx: 0,
+            spinner_tick: 0,
+            probing_ctx: false,
             status: String::new(),
             config: Config {
                 base_url: "http://localhost:11434/v1".to_string(),

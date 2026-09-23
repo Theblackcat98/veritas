@@ -9,8 +9,8 @@ endpoint — Ollama, llama.cpp server, OpenAI, OpenRouter, vLLM, etc.
 
 ## Features
 
-- Token-by-token SSE streaming with Esc-to-cancel, shimmer status line while
-  streaming
+- Token-by-token SSE streaming with Esc-to-cancel, animated bouncing braille
+  bar for pre-token thinking, and shimmer status line paired with live spinner
 - Full markdown rendering for agent replies — headings, lists, tables,
   links, blockquotes, and syntax-highlighted code blocks
 - PgUp/PgDn, Ctrl-U/Ctrl-D, and mouse-wheel scrolling with follow-tail
