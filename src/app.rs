@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
 use ratatui::backend::Backend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 use ratatui_textarea::{Input, TextArea};
 use tokio::runtime::Handle;
@@ -61,6 +62,74 @@ impl Config {
 /// (D011).
 pub const MAX_SCROLL: u16 = 60_000;
 
+/// Auto-hide the sidebar below this geometry (D032): 32-col sidebar +
+/// 40-col minimum main pane; height ≈ the no-GPU widget stack plus slack.
+pub const SIDEBAR_MIN_WIDTH: u16 = 72;
+pub const SIDEBAR_MIN_HEIGHT: u16 = 20;
+
+/// Phase 5 catalog (D031): signature + one-line description, alphabetical.
+/// Single source of truth for the `/` popup; `/help` stays curated.
+pub const COMMANDS: &[(&str, &str)] = &[
+    ("/clear", "Reset the conversation"),
+    ("/copy [n]", "Copy code block to clipboard"),
+    ("/export <file>", "Export transcript as markdown"),
+    ("/help", "Show this help"),
+    ("/model <id>", "Set model — bare re-detects"),
+    ("/session", "Open session picker (alias)"),
+    ("/sessions", "Open session picker"),
+    ("/sidebar", "Toggle sidebar visibility"),
+    ("/temp <0.0-2.0>", "Override temperature"),
+];
+
+/// Case-insensitive subsequence match of `query` against `target`.
+/// Lower score = closer match; `None` = no match. Each skipped character
+/// costs +1; a pure prefix therefore scores 0 (D031).
+pub fn fuzzy_score(query: &str, target: &str) -> Option<u32> {
+    let q: Vec<char> = query.to_lowercase().chars().collect();
+    let t: Vec<char> = target.to_lowercase().chars().collect();
+    if q.is_empty() {
+        return Some(0);
+    }
+    if q.len() > t.len() {
+        return None;
+    }
+    let mut qi = 0;
+    let mut score: u32 = 0;
+    for &c in &t {
+        if qi >= q.len() {
+            break;
+        }
+        if c == q[qi] {
+            qi += 1;
+        } else {
+            score += 1;
+        }
+    }
+    if qi < q.len() {
+        None
+    } else {
+        Some(score)
+    }
+}
+
+/// Fuzzy-ranked commands for the `/` popup (D031). `query` excludes the
+/// leading `/`. Equal scores keep `COMMANDS` declaration order.
+pub fn match_commands(query: &str) -> Vec<(&'static str, &'static str)> {
+    let mut scored: Vec<(u32, &'static str, &'static str)> = COMMANDS
+        .iter()
+        .filter_map(|&(cmd, desc)| {
+            let name = cmd.trim_start_matches('/').split(' ').next().unwrap_or("");
+            fuzzy_score(query, name).map(|score| (score, cmd, desc))
+        })
+        .collect();
+    // Stable sort: declaration order is the tiebreak for equal scores.
+    scored.sort_by_key(|&(score, _, _)| score);
+    scored
+        .into_iter()
+        .map(|(_, cmd, desc)| (cmd, desc))
+        .collect()
+}
+
 /// Session-picker overlay state (D013). Keyboard-only; owns no I/O —
 /// storage goes through `session`.
 pub struct Picker {
@@ -107,6 +176,12 @@ pub struct App<'a> {
     pub picker: Option<Picker>,
     /// Open help overlay; while `true`, every key routes to it (Esc closes).
     pub help_open: bool,
+    /// Manual sidebar override; None = auto by terminal size (D032).
+    pub sidebar_override: Option<bool>,
+    /// Visibility last drawn — what Ctrl-B flips relative to (D032).
+    pub sidebar_effective: bool,
+    /// Esc dismissed the `/` popup until the input text changes (D031).
+    pub cmd_popup_dismissed: bool,
     /// Phase (0.0..1.0) of the streaming shimmer sweep (D017).
     pub shimmer_phase: f32,
     meta_tx: UnboundedSender<(String, Option<u64>)>,
@@ -149,6 +224,9 @@ impl<'a> App<'a> {
             last_saved_len: 0,
             picker: None,
             help_open: false,
+            sidebar_override: None,
+            sidebar_effective: true,
+            cmd_popup_dismissed: false,
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: Some(meta_rx),
@@ -318,6 +396,40 @@ impl<'a> App<'a> {
         self.help_open = false;
     }
 
+    /// Effective sidebar visibility (D032): session override beats auto.
+    pub fn sidebar_visible(&self, area: Rect) -> bool {
+        self.sidebar_override
+            .unwrap_or(area.width >= SIDEBAR_MIN_WIDTH && area.height >= SIDEBAR_MIN_HEIGHT)
+    }
+
+    /// Flip sidebar visibility relative to what is currently effective (D032).
+    pub fn toggle_sidebar(&mut self) {
+        let show = !self.sidebar_effective;
+        self.sidebar_override = Some(show);
+        self.status = if show {
+            "Sidebar shown.".to_string()
+        } else {
+            "Sidebar hidden.".to_string()
+        };
+    }
+
+    /// Fuzzy matches for the `/` popup; empty when input isn't a `/` prefix
+    /// or the query no longer matches any command (D031).
+    pub fn cmd_popup_matches(&self) -> Vec<(&'static str, &'static str)> {
+        let Some(first) = self.input.lines().first() else {
+            return Vec::new();
+        };
+        let Some(query) = first.strip_prefix('/') else {
+            return Vec::new();
+        };
+        match_commands(query)
+    }
+
+    /// Whether the command popup should be drawn this frame (D031).
+    pub fn cmd_popup_visible(&self) -> bool {
+        !self.cmd_popup_dismissed && !self.cmd_popup_matches().is_empty()
+    }
+
     /// Modal key routing while the picker is open (D013).
     pub fn handle_picker_key(&mut self, code: KeyCode) {
         match code {
@@ -468,6 +580,7 @@ impl<'a> App<'a> {
                 None => self.copy_code_block(None),
             },
             Some("sessions") | Some("session") => self.open_picker(),
+            Some("sidebar") => self.toggle_sidebar(),
             Some("export") => {
                 // Take the rest of the line so paths with spaces work.
                 let rest = cmd.get("export".len()..).unwrap_or("").trim();
@@ -747,10 +860,21 @@ where
                     app.copy_code_block(None);
                     continue;
                 }
-                // Esc: cancel active stream
-                if key.code == KeyCode::Esc && app.streaming {
-                    app.cancel_stream();
+                // Ctrl-B: toggle sidebar visibility (D032).
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b') {
+                    app.toggle_sidebar();
                     continue;
+                }
+                // Esc: cancel active stream, else dismiss the command popup (D031).
+                if key.code == KeyCode::Esc {
+                    if app.streaming {
+                        app.cancel_stream();
+                        continue;
+                    }
+                    if app.cmd_popup_visible() {
+                        app.cmd_popup_dismissed = true;
+                        continue;
+                    }
                 }
                 // Enter: send message
                 if key.code == KeyCode::Enter && !key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -780,9 +904,13 @@ where
                     app.scroll = app.scroll.saturating_add(15).min(MAX_SCROLL);
                     continue;
                 }
-                // Everything else goes to the textarea.
-                let input = Input::from(Event::Key(key));
-                app.input.input(input);
+                // Everything else goes to the textarea. A text change
+                // re-opens a dismissed command popup (D031).
+                let before = app.input.lines().join("\n");
+                app.input.input(Input::from(Event::Key(key)));
+                if app.input.lines().join("\n") != before {
+                    app.cmd_popup_dismissed = false;
+                }
             }
             Event::Mouse(me) => match me.kind {
                 MouseEventKind::ScrollUp => {
@@ -986,6 +1114,9 @@ mod tests {
             last_saved_len: 0,
             picker: None,
             help_open: false,
+            sidebar_override: None,
+            sidebar_effective: true,
+            cmd_popup_dismissed: false,
             shimmer_phase: 0.0,
             meta_tx,
             meta_rx: None,
@@ -1002,5 +1133,176 @@ mod tests {
         // Test /session alias opens picker
         app.handle_command("session");
         assert!(app.picker.is_some());
+    }
+
+    #[test]
+    fn fuzzy_score_ranks_prefix_and_subsequence() {
+        assert_eq!(fuzzy_score("", "help"), Some(0));
+        assert_eq!(fuzzy_score("he", "help"), Some(0), "prefix scores 0");
+        assert_eq!(fuzzy_score("HELP", "help"), Some(0), "case-insensitive");
+        assert_eq!(fuzzy_score("hl", "help"), Some(1), "one skipped char");
+        assert_eq!(fuzzy_score("zzz", "help"), None);
+        assert_eq!(
+            fuzzy_score("export", "exp"),
+            None,
+            "query longer than target"
+        );
+        // Scattered match ranks worse than a contiguous prefix.
+        let export = fuzzy_score("ep", "export").expect("export matches");
+        let help = fuzzy_score("ep", "help").expect("help matches");
+        assert!(export < help, "export({export}) < help({help})");
+    }
+
+    #[test]
+    fn match_commands_finds_and_ranks_closest() {
+        let all = match_commands("");
+        assert_eq!(all.len(), COMMANDS.len(), "bare / lists every command");
+
+        let he = match_commands("he");
+        assert_eq!(he[0].0, "/help", "closest match first: {he:?}");
+        assert!(he.iter().all(|(c, _)| *c == "/help"), "only help matches");
+
+        let s = match_commands("s");
+        let names: Vec<&str> = s.iter().map(|(c, _)| *c).collect();
+        assert!(names.contains(&"/sessions"));
+        assert!(names.contains(&"/sidebar"));
+        assert!(!names.contains(&"/help"), "help has no 's'");
+
+        assert!(match_commands("zz").is_empty());
+        // Full command with arguments no longer matches the bare name.
+        assert!(match_commands("export myfile.md").is_empty());
+    }
+
+    #[test]
+    fn sidebar_command_toggles_relative_to_effective() {
+        let (meta_tx, _meta_rx) = unbounded_channel();
+        let (model_tx, _model_rx) = unbounded_channel::<Option<String>>();
+        let mut app = App {
+            messages: Vec::new(),
+            input: TextArea::default(),
+            scroll: 0,
+            follow: true,
+            streaming: false,
+            spinner_tick: 0,
+            probing_ctx: false,
+            model: Some("test-model".to_string()),
+            probing_model: false,
+            status: String::new(),
+            config: Config {
+                base_url: "http://localhost:11434/v1".to_string(),
+                api_key: String::new(),
+                model: Some("test-model".to_string()),
+            },
+            stats: SysStats::new(),
+            rx: None,
+            stream_task: None,
+            pending: String::new(),
+            temperature_override: None,
+            ctx_window: None,
+            session_id: None,
+            session_title: None,
+            session_created: 0,
+            last_saved_len: 0,
+            picker: None,
+            help_open: false,
+            sidebar_override: None,
+            sidebar_effective: true,
+            cmd_popup_dismissed: false,
+            shimmer_phase: 0.0,
+            meta_tx,
+            meta_rx: None,
+            model_tx,
+            model_rx: None,
+        };
+
+        // Auto-visible → toggle hides.
+        app.handle_command("sidebar");
+        assert_eq!(app.sidebar_override, Some(false));
+        assert_eq!(app.status, "Sidebar hidden.");
+
+        // Currently hidden → toggle force-shows (even if auto would hide).
+        app.sidebar_effective = false;
+        app.handle_command("sidebar");
+        assert_eq!(app.sidebar_override, Some(true));
+        assert_eq!(app.status, "Sidebar shown.");
+
+        // Override beats auto: narrow terminal still shows when forced.
+        let narrow = Rect::new(0, 0, 60, 30);
+        assert!(app.sidebar_visible(narrow));
+        app.sidebar_override = Some(false);
+        assert!(!app.sidebar_visible(Rect::new(0, 0, 80, 24)));
+
+        // No override → auto thresholds.
+        app.sidebar_override = None;
+        assert!(app.sidebar_visible(Rect::new(0, 0, 80, 24)));
+        assert!(!app.sidebar_visible(Rect::new(0, 0, 71, 24)));
+        assert!(!app.sidebar_visible(Rect::new(0, 0, 80, 19)));
+    }
+
+    #[test]
+    fn cmd_popup_visibility_rules() {
+        let (meta_tx, _meta_rx) = unbounded_channel();
+        let (model_tx, _model_rx) = unbounded_channel::<Option<String>>();
+        let mut app = App {
+            messages: Vec::new(),
+            input: TextArea::default(),
+            scroll: 0,
+            follow: true,
+            streaming: false,
+            spinner_tick: 0,
+            probing_ctx: false,
+            model: Some("test-model".to_string()),
+            probing_model: false,
+            status: String::new(),
+            config: Config {
+                base_url: "http://localhost:11434/v1".to_string(),
+                api_key: String::new(),
+                model: Some("test-model".to_string()),
+            },
+            stats: SysStats::new(),
+            rx: None,
+            stream_task: None,
+            pending: String::new(),
+            temperature_override: None,
+            ctx_window: None,
+            session_id: None,
+            session_title: None,
+            session_created: 0,
+            last_saved_len: 0,
+            picker: None,
+            help_open: false,
+            sidebar_override: None,
+            sidebar_effective: true,
+            cmd_popup_dismissed: false,
+            shimmer_phase: 0.0,
+            meta_tx,
+            meta_rx: None,
+            model_tx,
+            model_rx: None,
+        };
+
+        assert!(!app.cmd_popup_visible(), "empty input hides popup");
+
+        app.input.insert_str("hello");
+        assert!(!app.cmd_popup_visible(), "non-slash input hides popup");
+
+        app.input = TextArea::default();
+        app.input.insert_str("/he");
+        assert!(app.cmd_popup_visible(), "slash prefix shows popup");
+        assert_eq!(app.cmd_popup_matches()[0].0, "/help");
+
+        app.cmd_popup_dismissed = true;
+        assert!(!app.cmd_popup_visible(), "Esc dismiss hides popup");
+
+        // Any text change clears the dismiss flag (run loop does this);
+        // "/hel" still fuzzy-matches help, so the popup returns.
+        app.input.insert_str("l");
+        app.cmd_popup_dismissed = false;
+        assert!(app.cmd_popup_visible(), "editing re-opens the popup");
+
+        // Query with no matches hides (e.g. after args / typos).
+        app.input = TextArea::default();
+        app.input.insert_str("/zz");
+        assert!(!app.cmd_popup_visible());
     }
 }

@@ -13,16 +13,31 @@ use crate::md_style;
 use crate::session;
 use crate::theme::Theme;
 
-/// Outer: horizontal [main | sidebar(30)].
+/// Outer: horizontal [main | sidebar(32)] — sidebar omitted below 72×20
+/// unless manually shown (D032).
 /// Main: vertical [transcript | spinner(1) | input(6)].
 /// Sidebar: vertical [header(3) | model table(8) | spacer | gauges].
 pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(Block::default().style(Theme::canvas()), f.area());
 
+    let area = f.area();
+    let show_sidebar = app.sidebar_visible(area);
+    app.sidebar_effective = show_sidebar;
     let outer = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(40), Constraint::Length(32)])
-        .split(f.area());
+        .constraints([
+            if show_sidebar {
+                Constraint::Min(40)
+            } else {
+                Constraint::Min(0)
+            },
+            if show_sidebar {
+                Constraint::Length(32)
+            } else {
+                Constraint::Length(0)
+            },
+        ])
+        .split(area);
 
     let main = Layout::default()
         .direction(Direction::Vertical)
@@ -36,7 +51,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_transcript(f, app, main[0]);
     draw_spinner(f, app, main[1]);
     draw_input(f, app, main[2]);
-    draw_sidebar(f, app, outer[1]);
+    if show_sidebar {
+        draw_sidebar(f, app, outer[1]);
+    }
+
+    // Ambient `/` command guide — floats above input, never steals keys (D031).
+    if app.cmd_popup_visible() {
+        draw_cmd_popup(f, app, main[2]);
+    }
 
     // Modal overlays render last, on top of everything (D013).
     if app.picker.is_some() {
@@ -145,6 +167,55 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
+/// Phase 5 (D031): tiny non-modal popup floating directly above the input
+/// block. Guidance only — keys never route here; Enter still sends.
+fn draw_cmd_popup(f: &mut Frame, app: &App, input_area: ratatui::layout::Rect) {
+    let matches = app.cmd_popup_matches();
+    if matches.is_empty() {
+        return;
+    }
+    // Grow one row per match, clamped to the space above the input.
+    let want_h = matches.len() as u16 + 2; // + borders
+    let max_h = input_area.y.max(3);
+    let height = want_h.min(max_h);
+    let shown = matches.iter().take(height.saturating_sub(2) as usize);
+    // Fit the longest (command + description) row, clamped to the input width.
+    let want_w = matches
+        .iter()
+        .map(|(c, d)| c.chars().count() + 2 + d.chars().count() + 2)
+        .max()
+        .unwrap_or(40)
+        .clamp(30, 64) as u16;
+    let width = want_w.min(input_area.width.max(1));
+    let popup = ratatui::layout::Rect {
+        x: input_area.x,
+        y: input_area.y.saturating_sub(height),
+        width,
+        height,
+    };
+
+    let modal = modal_block("Commands");
+    let inner = modal.inner(popup);
+    f.render_widget(Clear, popup);
+    f.render_widget(modal, popup);
+
+    let items: Vec<ListItem> = shown
+        .map(|(cmd, desc)| {
+            ListItem::new(Line::from(vec![
+                Span::styled(*cmd, Theme::command_hint()),
+                Span::styled(format!("  {desc}"), Theme::muted()),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(0)); // closest match highlighted
+    let list = List::new(items)
+        .style(Theme::modal_surface())
+        .highlight_style(Theme::selected_row())
+        .highlight_symbol("› ");
+    f.render_stateful_widget(list, inner, &mut state);
+}
+
 fn key_row(key: &str, desc: &str) -> Line<'static> {
     let pad = 16usize.saturating_sub(key.len()).max(2);
     Line::from(vec![
@@ -165,7 +236,8 @@ fn cmd_row(cmd: &str, desc: &str) -> Line<'static> {
 
 /// Centered help overlay showing all keybindings (like the session picker).
 fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
-    let popup_h = 22.min(area.height);
+    // 20 content rows + 2 borders + footer: fits a standard 24-row terminal.
+    let popup_h = 24.min(area.height);
     let top_pad = area.height.saturating_sub(popup_h) / 2;
     let vert = Layout::default()
         .direction(Direction::Vertical)
@@ -195,6 +267,7 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
         key_row("Ctrl-U / Ctrl-D", "Scroll up / down"),
         key_row("Ctrl-Y", "Copy latest code block"),
         key_row("Ctrl-S", "Open session picker"),
+        key_row("Ctrl-B", "Toggle sidebar"),
         Line::from(""),
         Line::from(Span::styled("COMMANDS", Theme::section_title())),
         cmd_row("/help", "Show this help"),
@@ -204,6 +277,7 @@ fn draw_help(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
         cmd_row("/export <file>", "Export transcript as markdown"),
         cmd_row("/model <id>", "Set model"),
         cmd_row("/temp <0.0-2.0>", "Set temperature (overrides engine)"),
+        cmd_row("/sidebar", "Toggle sidebar visibility"),
     ];
 
     let modal = modal_block("Help");
@@ -954,5 +1028,91 @@ mod tests {
         assert!(is_error_status("Failed to copy to clipboard."));
         assert!(!is_error_status("Ready — Enter send"));
         assert!(!is_error_status("Saved sess-1 · 2 msgs"));
+    }
+
+    #[tokio::test]
+    async fn cmd_popup_shows_closest_match_above_input() {
+        let mut app = test_app();
+        app.input.insert_str("/he");
+        let text = render(&mut app, 80, 24);
+        assert!(text.contains("Commands"), "popup title visible:\n{text}");
+        assert!(text.contains("/help"), "closest command listed:\n{text}");
+        assert!(
+            text.contains("Show this help"),
+            "description shown:\n{text}"
+        );
+
+        // Bare `/` lists every command (discovery).
+        app.input = ratatui_textarea::TextArea::default();
+        app.input.insert_str("/");
+        let text = render(&mut app, 80, 24);
+        assert!(text.contains("/export"), "full catalog on bare /:\n{text}");
+        assert!(text.contains("/sidebar"), "sidebar command listed:\n{text}");
+    }
+
+    #[tokio::test]
+    async fn cmd_popup_hidden_without_slash_and_when_dismissed() {
+        let mut app = test_app();
+        let text = render(&mut app, 80, 24);
+        assert!(
+            !text.contains("Commands"),
+            "empty input hides popup:\n{text}"
+        );
+
+        app.input.insert_str("hello");
+        let text = render(&mut app, 80, 24);
+        assert!(!text.contains("Commands"), "chat text hides popup:\n{text}");
+
+        app.input = ratatui_textarea::TextArea::default();
+        app.input.insert_str("/he");
+        app.cmd_popup_dismissed = true;
+        let text = render(&mut app, 80, 24);
+        assert!(
+            !text.contains("Commands"),
+            "Esc-dismiss hides popup:\n{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sidebar_auto_hides_on_narrow_terminal() {
+        let mut app = test_app();
+        // 60 cols < 72 → auto-hidden; transcript gets the full width.
+        let narrow = render(&mut app, 60, 30);
+        assert!(
+            !narrow.contains("Veritas Agent"),
+            "sidebar auto-hides below 72 cols:\n{narrow}"
+        );
+        // 80×24 ≥ thresholds → visible (D025 target geometry).
+        let wide = render(&mut app, 80, 24);
+        assert!(
+            wide.contains("Veritas Agent"),
+            "sidebar visible at 80×24:\n{wide}"
+        );
+        assert!(wide.contains("Model"), "model table at 80×24:\n{wide}");
+    }
+
+    #[tokio::test]
+    async fn sidebar_manual_override_beats_auto_hide() {
+        let mut app = test_app();
+        // Force-show on a terminal that would auto-hide.
+        app.sidebar_override = Some(true);
+        let text = render(&mut app, 60, 30);
+        assert!(
+            text.contains("Veritas Agent"),
+            "override forces sidebar on narrow terminal:\n{text}"
+        );
+
+        // Force-hide on a terminal that would auto-show.
+        app.sidebar_override = Some(false);
+        let text = render(&mut app, 80, 24);
+        assert!(
+            !text.contains("Veritas Agent"),
+            "override forces sidebar hidden at 80×24:\n{text}"
+        );
+        // Full-width transcript still works when hidden.
+        assert!(
+            text.contains("Chat"),
+            "transcript spans full width:\n{text}"
+        );
     }
 }

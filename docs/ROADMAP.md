@@ -59,13 +59,14 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - Help overlay modal listing keybindings via `/help` ✅ (D018/D022; `?` shortcut rejected per D024)
 - CI: build + clippy (.github/workflows/ci.yml) ✅
 - `--version` flag ✅ (D025), README screenshots
+- Sidebar visibility: `Ctrl-B` / `/sidebar` toggle; auto-hides below 72×20 (D032) ✅
 
-## Phase 5 — Command autocompletion & live preview 🧭
+## Phase 5 — Command autocompletion & live preview ✅
 
-- Live command preview popup triggered immediately when user input begins with `/` (temporary floating overlay above the input area, not a modal like `/help`)
-- Live tooltips/descriptions for available slash commands
-- Fuzzy find matching and filtering of commands as the query is typed
-- Seamless dismissal on backspace, Esc, or non-command input
+- Live command preview popup triggered immediately when user input begins with `/` (temporary floating overlay above the input area, not a modal like `/help`) ✅ (D031)
+- Live tooltips/descriptions for available slash commands ✅ (D031)
+- Fuzzy find matching and filtering of commands as the query is typed ✅ (D031)
+- Seamless dismissal on backspace, Esc, or non-command input ✅ (D031)
 
 ## Phase 6 — Local engine launcher (llama.cpp) 🧭
 
@@ -93,8 +94,8 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 | Sparkline (ratatui)          | GPU % history               | ✅ real (P1)                  |
 | Table (ratatui)              | Model params                | ✅ real params (P1)           |
 | Scrollbar (ratatui)          | Transcript position         | ✅                            |
-| Clear widget (ratatui)       | Overlay backgrounds         | ✅ real (P2 picker, help)     |
-| List (ratatui)               | Session picker rows         | ✅ real (P2, D013)            |
+| Clear widget (ratatui)       | Overlay backgrounds         | ✅ real (P2 picker, help, D031) |
+| List (ratatui)               | Picker & command popup rows | ✅ real (P2 D013, P5 D031)    |
 | Spinners (tui-spinner)       | Thinking & status activity  | ✅ real (D029)                |
 
 New widgets need a DECISIONS entry (see AGENTS.md rule 8).
@@ -112,4 +113,6 @@ New widgets need a DECISIONS entry (see AGENTS.md rule 8).
 | `/model`, `/temp`            | Set params                 | ✅     |
 | Ctrl-S                       | Sessions picker (save+list)| ✅ P2  |
 | Ctrl-Y                       | Copy latest code block     | ✅ D026|
+| Ctrl-B                       | Toggle sidebar             | ✅ D032|
+| `/` (input prefix)           | Command popup (fuzzy)      | ✅ D031|
 

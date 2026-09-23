@@ -58,6 +58,8 @@ Rules:
 | [D028](#d028--roadmap-phase-6-llamacpp-engine-launcher-from-chat-with-config-file-command-definition) | 2026-09-19 | accepted | Engine / Roadmap | Phase 6 llama.cpp engine launcher from chat with single config file |
 | [D029](#d029--animated-spinner-widgets-via-tui-spinner--ratatui-spinner) | 2026-09-20 | accepted | UI / Widgets | Animated BarSpinner & FluxSpinner via `tui-spinner` for TTFT, status, & probing |
 | [D030](#d030--no-default-model-auto-detect-from-engine-models) | 2026-09-23 | accepted (qualifies [D001](#d001--configuration-via-environment-variables-only)) | Config / Provider | No hardcoded default model; auto-detect via `GET /models`; `n/a` fallback |
+| [D031](#d031--phase-5-command-popup-hand-rolled-fuzzy-match-floating-above-input) | 2026-09-23 | accepted (implements [D027](#d027--session-alias-and-phase-5-slash-command-live-preview-popup-roadmap-entry)) | Commands / UI | `/` popup: zero-dep fuzzy match, `COMMANDS` catalog, floating above input |
+| [D032](#d032--sidebar-visibility-ctrl-b--sidebar-toggle-with-size-based-auto-hide) | 2026-09-23 | accepted | UI / Layout | `Ctrl-B`//`sidebar` toggle; auto-hide below 72×20; session override |
 
 ---
 
@@ -465,3 +467,30 @@ Rules:
   - Otherwise probe `GET {OPENAI_BASE_URL}/models` at startup (and on bare `/model`) and use the first returned model id.
   - Sidebar shows `n/a` when no model is known; sending with no model re-probes once and otherwise refuses with a status-line hint instead of firing a doomed request.
 - **Consequences:** First-run experience reflects the real engine; offline servers degrade to `n/a` rather than errors. Adds one lightweight probe request. README/config docs must say "auto-detected", never a concrete default id.
+
+## D031 — Phase 5 command popup: hand-rolled fuzzy match, floating above input
+- **Date:** 2026-09-23
+- **Status:** accepted (implements D027 / ROADMAP Phase 5)
+- **Context:**
+  1. D027 approved a live slash-command preview so users can discover commands without opening the modal `/help` overlay.
+  2. Rule 2: a fuzzy-matcher crate (`nucleo`, `fuzzy-matcher`, …) would be a new dependency for ranking a static list of nine ASCII command names.
+  3. The popup must not steal keys — it is ambient guidance, not a picker (D013 stays the only key-routing modal besides `/help`).
+- **Decision:**
+  - Single source of truth: `app::COMMANDS: &[(&str, &str)]` (signature + one-line description), alphabetical. The `/help` overlay stays curated (owner decision 2026-09-23) and is not generated from it.
+  - Ranking: zero-dependency `fuzzy_score` — case-insensitive subsequence match of the typed query against the bare command name; each skipped character costs +1; equal scores keep declaration order (stable sort). Query = first input line after the leading `/`.
+  - Visibility is derived, not a mode: input starts with `/` **and** ≥1 command matches. Backspace/non-`/` input hides it naturally; a query that no longer matches (e.g. after typing arguments past the name) hides it too. `Esc` sets a dismiss flag that clears on the next text change.
+  - Rendering: small `Clear` + `List` panel floating directly above the input block, closest match selected on row 1; not a full-screen modal. `Enter` still sends; the popup never intercepts keys.
+- **Consequences:** No new dependency (rules 2/8). Adding a slash command = one `COMMANDS` row plus README/help updates. Popup height is capped by available space above the input.
+
+## D032 — Sidebar visibility: Ctrl-B / /sidebar toggle with size-based auto-hide
+- **Date:** 2026-09-23
+- **Status:** accepted
+- **Context:**
+  1. The fixed 32-column sidebar permanently steals width from the transcript; below ~72 columns the `Min(40)` main pane leaves chat cramped.
+  2. Telemetry is glanceable, not chat-critical — hiding it temporarily costs little (rule 9: hide, never fake).
+  3. Both a key bind and a slash command were requested, plus auto-hide at small terminal sizes so the gauge stack never clips.
+- **Decision:**
+  - Effective visibility = session override `sidebar_override: Option<bool>` when the user has toggled, else auto: `width >= 72 && height >= 20` (32-col sidebar + 40-col minimum main; height ≈ the no-GPU widget stack of 18 rows plus slack).
+  - `Ctrl-B` and bare `/sidebar` flip visibility relative to whatever is currently effective — so from auto-hidden you force-show, from shown you hide. Manual override wins over auto for the rest of the session (no reset command; restart clears it).
+  - When hidden, layout is a single full-width column — the sidebar is not drawn at all (never faked with zeros).
+- **Consequences:** Transcript gains 32 columns on narrow terminals. Resize does not clear a manual override. Tests lock auto-hide (60×30) and override behavior (80×24).
