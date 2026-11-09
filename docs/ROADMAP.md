@@ -50,7 +50,6 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
   `tui-markdown` (D015 supersedes the lightweight scope; code blocks get
   syntax highlighting)
 - Keyboard copy of code-block contents (`/copy [n]`, `Ctrl-Y`) ✅ (D026)
-- Readability pass on the theme (spacing, label styling) 🔜
 - Streaming shimmer on the status line ✅ (D017)
 
 ## Phase 4 — Polish & release 🧭
@@ -58,7 +57,7 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - Theme presets selectable via env var `VERITAS_THEME` (`default`, `amber`, `green`, `monochrome`) ✅ (D026)
 - Help overlay modal listing keybindings via `/help` ✅ (D018/D022; `?` shortcut rejected per D024)
 - CI: build + clippy (.github/workflows/ci.yml) ✅
-- `--version` flag ✅ (D025), README screenshots
+- `--version` flag ✅ (D025)
 - Sidebar visibility: `Ctrl-B` / `/sidebar` toggle; auto-hides below 72×20 (D032) ✅
 - `/quit` exits the app (D034) ✅
 
@@ -69,12 +68,6 @@ The sidebar showed fake data. Now real sources with graceful fallbacks
 - Fuzzy find matching and filtering of commands as the query is typed ✅ (D031)
 - Seamless dismissal on backspace, Esc, or non-command input ✅ (D031)
 - ↑/↓ select a row, Tab completes the highlighted signature, Enter runs the highlighted command (D033) ✅
-
-## Phase 6 — Local engine launcher (llama.cpp) 🧭
-
-- Start a `llama.cpp` server directly from chat via a slash command (e.g. `/llamacpp start` or `/engine start`)
-- Run command template / binary path configured in a local config file (e.g. `~/.config/veritas/config.toml` under XDG config home)
-- Lifecycle management: start process in background, monitor process status / health check endpoint, display readiness in status bar, and stop on shutdown or via slash command
 
 ## Explicitly rejected 🚫
 
